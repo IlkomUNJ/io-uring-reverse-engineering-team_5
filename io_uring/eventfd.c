@@ -11,6 +11,10 @@
 #include "io-wq.h"
 #include "eventfd.h"
 
+/**
+ * Holds state and references for an eventfd used by io_uring for completion queue notifications.
+ * Includes eventfd context, async mode, last CQ tail, reference count, ops state, and RCU head for cleanup.
+ */
 struct io_ev_fd {
 	struct eventfd_ctx	*cq_ev_fd;
 	unsigned int		eventfd_async;
@@ -25,6 +29,7 @@ enum {
 	IO_EVENTFD_OP_SIGNAL_BIT,
 };
 
+// Cleanup function called when reference count drops to zero.
 static void io_eventfd_free(struct rcu_head *rcu)
 {
 	struct io_ev_fd *ev_fd = container_of(rcu, struct io_ev_fd, rcu);
@@ -33,20 +38,23 @@ static void io_eventfd_free(struct rcu_head *rcu)
 	kfree(ev_fd);
 }
 
+// Decreases reference count of ev_fd, and calls cleanup if it reaches zero.
 static void io_eventfd_put(struct io_ev_fd *ev_fd)
 {
 	if (refcount_dec_and_test(&ev_fd->refs))
 		call_rcu(&ev_fd->rcu, io_eventfd_free);
 }
 
+// Sends signal to eventfd (via RCPU) and releases reference.
 static void io_eventfd_do_signal(struct rcu_head *rcu)
 {
-	struct io_ev_fd *ev_fd = container_of(rcu, struct io_ev_fd, rcu);
+	struct io_ev_fd *ev_fd = container_of(rcu, struct io_ev_fd, rcpu);
 
 	eventfd_signal_mask(ev_fd->cq_ev_fd, EPOLL_URING_WAKE);
 	io_eventfd_put(ev_fd);
 }
 
+// Releases reference of ev_fd if requested, and finishes RCPU read.
 static void io_eventfd_release(struct io_ev_fd *ev_fd, bool put_ref)
 {
 	if (put_ref)
@@ -54,9 +62,7 @@ static void io_eventfd_release(struct io_ev_fd *ev_fd, bool put_ref)
 	rcu_read_unlock();
 }
 
-/*
- * Returns true if the caller should put the ev_fd reference, false if not.
- */
+// Sends signal to eventfd if allowed, or schedules it via RCPU.
 static bool __io_eventfd_signal(struct io_ev_fd *ev_fd)
 {
 	if (eventfd_signal_allowed()) {
@@ -70,10 +76,7 @@ static bool __io_eventfd_signal(struct io_ev_fd *ev_fd)
 	return true;
 }
 
-/*
- * Trigger if eventfd_async isn't set, or if it's set and the caller is
- * an async worker. If ev_fd isn't valid, obviously return false.
- */
+// Checks if the current worker is allowed to trigger eventfd signal.
 static bool io_eventfd_trigger(struct io_ev_fd *ev_fd)
 {
 	if (ev_fd)
@@ -81,10 +84,7 @@ static bool io_eventfd_trigger(struct io_ev_fd *ev_fd)
 	return false;
 }
 
-/*
- * On success, returns with an ev_fd reference grabbed and the RCU read
- * lock held.
- */
+// Grabs ev_fd from context and increases reference count if valid.
 static struct io_ev_fd *io_eventfd_grab(struct io_ring_ctx *ctx)
 {
 	struct io_ev_fd *ev_fd;
@@ -94,17 +94,8 @@ static struct io_ev_fd *io_eventfd_grab(struct io_ring_ctx *ctx)
 
 	rcu_read_lock();
 
-	/*
-	 * rcu_dereference ctx->io_ev_fd once and use it for both for checking
-	 * and eventfd_signal
-	 */
 	ev_fd = rcu_dereference(ctx->io_ev_fd);
 
-	/*
-	 * Check again if ev_fd exists in case an io_eventfd_unregister call
-	 * completed between the NULL check of ctx->io_ev_fd at the start of
-	 * the function and rcu_read_lock.
-	 */
 	if (io_eventfd_trigger(ev_fd) && refcount_inc_not_zero(&ev_fd->refs))
 		return ev_fd;
 
@@ -112,6 +103,7 @@ static struct io_ev_fd *io_eventfd_grab(struct io_ring_ctx *ctx)
 	return NULL;
 }
 
+// Sends signal to eventfd if context has active eventfd.
 void io_eventfd_signal(struct io_ring_ctx *ctx)
 {
 	struct io_ev_fd *ev_fd;
@@ -121,6 +113,7 @@ void io_eventfd_signal(struct io_ring_ctx *ctx)
 		io_eventfd_release(ev_fd, __io_eventfd_signal(ev_fd));
 }
 
+// Sends signal to eventfd only if a new CQE is added.
 void io_eventfd_flush_signal(struct io_ring_ctx *ctx)
 {
 	struct io_ev_fd *ev_fd;
@@ -129,15 +122,6 @@ void io_eventfd_flush_signal(struct io_ring_ctx *ctx)
 	if (ev_fd) {
 		bool skip, put_ref = true;
 
-		/*
-		 * Eventfd should only get triggered when at least one event
-		 * has been posted. Some applications rely on the eventfd
-		 * notification count only changing IFF a new CQE has been
-		 * added to the CQ ring. There's no dependency on 1:1
-		 * relationship between how many times this function is called
-		 * (and hence the eventfd count) and number of CQEs posted to
-		 * the CQ ring.
-		 */
 		spin_lock(&ctx->completion_lock);
 		skip = ctx->cached_cq_tail == ev_fd->last_cq_tail;
 		ev_fd->last_cq_tail = ctx->cached_cq_tail;
@@ -150,6 +134,7 @@ void io_eventfd_flush_signal(struct io_ring_ctx *ctx)
 	}
 }
 
+// Registers a new eventfd with context, and stores its state in ev_fd.
 int io_eventfd_register(struct io_ring_ctx *ctx, void __user *arg,
 			unsigned int eventfd_async)
 {
@@ -189,6 +174,7 @@ int io_eventfd_register(struct io_ring_ctx *ctx, void __user *arg,
 	return 0;
 }
 
+// Unregisters eventfd from context and releases all references.
 int io_eventfd_unregister(struct io_ring_ctx *ctx)
 {
 	struct io_ev_fd *ev_fd;

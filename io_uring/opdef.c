@@ -39,18 +39,28 @@
 #include "truncate.h"
 #include "zcrx.h"
 
+/**
+ * Returns -ECANCELED and warns if called; used as a placeholder for ops with no issue handler.
+ */
 static int io_no_issue(struct io_kiocb *req, unsigned int issue_flags)
 {
 	WARN_ON_ONCE(1);
 	return -ECANCELED;
 }
 
+/**
+ * Returns -EOPNOTSUPP; used as a placeholder for unsupported op prep handlers.
+ */
 static __maybe_unused int io_eopnotsupp_prep(struct io_kiocb *kiocb,
 					     const struct io_uring_sqe *sqe)
 {
 	return -EOPNOTSUPP;
 }
 
+/**
+ * io_issue_defs: Table defining properties and handlers for each io_uring opcode.
+ * Each entry specifies requirements, flags, and function pointers for preparation and issue handling.
+ */
 const struct io_issue_def io_issue_defs[] = {
 	[IORING_OP_NOP] = {
 		.audit_skip		= 1,
@@ -571,6 +581,10 @@ const struct io_issue_def io_issue_defs[] = {
 	},
 };
 
+/**
+ * io_cold_defs: Table providing cold-path metadata for each io_uring opcode.
+ * Contains operation names and optional cleanup/failure handlers for each opcode.
+ */
 const struct io_cold_def io_cold_defs[] = {
 	[IORING_OP_NOP] = {
 		.name			= "NOP",
@@ -817,6 +831,9 @@ const struct io_cold_def io_cold_defs[] = {
 	},
 };
 
+/**
+ * Returns the string name of an io_uring opcode, or "INVALID" if out of range.
+ */
 const char *io_uring_get_opcode(u8 opcode)
 {
 	if (opcode < IORING_OP_LAST)
@@ -824,6 +841,9 @@ const char *io_uring_get_opcode(u8 opcode)
 	return "INVALID";
 }
 
+/**
+ * Returns true if the given opcode is supported (prep handler is not eopnotsupp).
+ */
 bool io_uring_op_supported(u8 opcode)
 {
 	if (opcode < IORING_OP_LAST &&
@@ -832,6 +852,9 @@ bool io_uring_op_supported(u8 opcode)
 	return false;
 }
 
+/**
+ * Validates the io_uring opcode tables at init; ensures all ops are defined and consistent.
+ */
 void __init io_uring_optable_init(void)
 {
 	int i;

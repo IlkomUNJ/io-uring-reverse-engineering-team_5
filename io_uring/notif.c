@@ -9,8 +9,18 @@
 #include "notif.h"
 #include "rsrc.h"
 
+/*
+ * io_ubuf_ops - ubuf_info_ops implementation for io_uring notifications.
+ * Provides callbacks for TX buffer completion and socket buffer linking
+ * in zero-copy notification handling.
+ */
 static const struct ubuf_info_ops io_ubuf_ops;
 
+/*
+ * io_notif_tw_complete() - Completes the notification task work and processes 
+ * all related notifications, handling zero-copy reporting and memory 
+ * unaccounting.
+ */
 static void io_notif_tw_complete(struct io_kiocb *notif, io_tw_token_t tw)
 {
 	struct io_notif_data *nd = io_notif_to_data(notif);
@@ -33,6 +43,10 @@ static void io_notif_tw_complete(struct io_kiocb *notif, io_tw_token_t tw)
 	} while (nd);
 }
 
+/*
+ * io_tx_ubuf_complete() - Handles the completion of the TX buffer, updating 
+ * zero-copy status and triggering task completion if necessary.
+ */
 void io_tx_ubuf_complete(struct sk_buff *skb, struct ubuf_info *uarg,
 			 bool success)
 {
@@ -60,6 +74,10 @@ void io_tx_ubuf_complete(struct sk_buff *skb, struct ubuf_info *uarg,
 	__io_req_task_work_add(notif, tw_flags);
 }
 
+/*
+ * io_link_skb() - Links a socket buffer (skb) to a notification, handling 
+ * special cases for zero-copy and previous notification links.
+ */
 static int io_link_skb(struct sk_buff *skb, struct ubuf_info *uarg)
 {
 	struct io_notif_data *nd, *prev_nd;
@@ -87,7 +105,7 @@ static int io_link_skb(struct sk_buff *skb, struct ubuf_info *uarg)
 	prev_nd = container_of(prev_uarg, struct io_notif_data, uarg);
 	prev_notif = cmd_to_io_kiocb(nd);
 
-	/* make sure all noifications can be finished in the same task_work */
+	/* make sure all notifications can be finished in the same task_work */
 	if (unlikely(notif->ctx != prev_notif->ctx ||
 		     notif->tctx != prev_notif->tctx))
 		return -EEXIST;
@@ -99,11 +117,16 @@ static int io_link_skb(struct sk_buff *skb, struct ubuf_info *uarg)
 	return 0;
 }
 
+/* ubuf_info operations for notification handling */
 static const struct ubuf_info_ops io_ubuf_ops = {
 	.complete = io_tx_ubuf_complete,
 	.link_skb = io_link_skb,
 };
 
+/*
+ * io_alloc_notif() - Allocates and initializes a notification request, setting 
+ * up necessary fields and data for task completion.
+ */
 struct io_kiocb *io_alloc_notif(struct io_ring_ctx *ctx)
 	__must_hold(&ctx->uring_lock)
 {

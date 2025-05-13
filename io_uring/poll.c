@@ -22,6 +22,10 @@
 #include "poll.h"
 #include "cancel.h"
 
+/**
+ * Holds state for a poll update operation, including file, user data, events,
+ * and update flags.
+ */
 struct io_poll_update {
 	struct file			*file;
 	u64				old_user_data;
@@ -31,6 +35,10 @@ struct io_poll_update {
 	bool				update_user_data;
 };
 
+/**
+ * Holds state for a poll wait operation, including poll table, request, entry count,
+ * error status, ownership, and result mask.
+ */
 struct io_poll_table {
 	struct poll_table_struct pt;
 	struct io_kiocb *req;
@@ -53,9 +61,15 @@ struct io_poll_table {
 
 #define IO_WQE_F_DOUBLE		1
 
+/**
+ * Called when a poll wait queue is woken up. Handles event delivery and ownership.
+ */
 static int io_poll_wake(struct wait_queue_entry *wait, unsigned mode, int sync,
 			void *key);
 
+/**
+ * Convert a wait_queue_entry to its associated io_kiocb request.
+ */
 static inline struct io_kiocb *wqe_to_req(struct wait_queue_entry *wqe)
 {
 	unsigned long priv = (unsigned long)wqe->private;
@@ -63,6 +77,9 @@ static inline struct io_kiocb *wqe_to_req(struct wait_queue_entry *wqe)
 	return (struct io_kiocb *)(priv & ~IO_WQE_F_DOUBLE);
 }
 
+/**
+ * Check if a wait_queue_entry is a double poll entry.
+ */
 static inline bool wqe_is_double(struct wait_queue_entry *wqe)
 {
 	unsigned long priv = (unsigned long)wqe->private;
@@ -70,6 +87,9 @@ static inline bool wqe_is_double(struct wait_queue_entry *wqe)
 	return priv & IO_WQE_F_DOUBLE;
 }
 
+/**
+ * Try to get poll request ownership in slowpath, set retry flag if needed.
+ */
 static bool io_poll_get_ownership_slowpath(struct io_kiocb *req)
 {
 	int v;
@@ -98,11 +118,17 @@ static inline bool io_poll_get_ownership(struct io_kiocb *req)
 	return !(atomic_fetch_inc(&req->poll_refs) & IO_POLL_REF_MASK);
 }
 
+/**
+ * Mark a poll request as cancelled by setting the cancel flag.
+ */
 static void io_poll_mark_cancelled(struct io_kiocb *req)
 {
 	atomic_or(IO_POLL_CANCEL_FLAG, &req->poll_refs);
 }
 
+/**
+ * Get the double poll structure from a request.
+ */
 static struct io_poll *io_poll_get_double(struct io_kiocb *req)
 {
 	/* pure poll stashes this in ->async_data, poll driven retry elsewhere */
@@ -111,6 +137,9 @@ static struct io_poll *io_poll_get_double(struct io_kiocb *req)
 	return req->apoll->double_poll;
 }
 
+/**
+ * Get the single poll structure from a request.
+ */
 static struct io_poll *io_poll_get_single(struct io_kiocb *req)
 {
 	if (req->opcode == IORING_OP_POLL_ADD)
@@ -118,6 +147,9 @@ static struct io_poll *io_poll_get_single(struct io_kiocb *req)
 	return &req->apoll->poll;
 }
 
+/**
+ * Insert a poll request into the cancel hash table.
+ */
 static void io_poll_req_insert(struct io_kiocb *req)
 {
 	struct io_hash_table *table = &req->ctx->cancel_table;
@@ -128,6 +160,9 @@ static void io_poll_req_insert(struct io_kiocb *req)
 	hlist_add_head(&req->hash_node, &table->hbs[index].list);
 }
 
+/**
+ * Initialize a poll iocb structure with events and waitqueue.
+ */
 static void io_init_poll_iocb(struct io_poll *poll, __poll_t events)
 {
 	poll->head = NULL;
@@ -138,6 +173,9 @@ static void io_init_poll_iocb(struct io_poll *poll, __poll_t events)
 	init_waitqueue_func_entry(&poll->wait, io_poll_wake);
 }
 
+/**
+ * Remove a poll entry from its waitqueue if present.
+ */
 static inline void io_poll_remove_entry(struct io_poll *poll)
 {
 	struct wait_queue_head *head = smp_load_acquire(&poll->head);
@@ -150,6 +188,9 @@ static inline void io_poll_remove_entry(struct io_poll *poll)
 	}
 }
 
+/**
+ * Remove all poll entries (single/double) from their waitqueues for a request.
+ */
 static void io_poll_remove_entries(struct io_kiocb *req)
 {
 	/*
@@ -190,6 +231,9 @@ enum {
 	IOU_POLL_REQUEUE = 4,
 };
 
+/**
+ * Execute poll completion logic, set result and schedule task work.
+ */
 static void __io_poll_execute(struct io_kiocb *req, int mask)
 {
 	unsigned flags = 0;
@@ -204,6 +248,9 @@ static void __io_poll_execute(struct io_kiocb *req, int mask)
 	__io_req_task_work_add(req, flags);
 }
 
+/**
+ * Execute poll completion if ownership is acquired.
+ */
 static inline void io_poll_execute(struct io_kiocb *req, int res)
 {
 	if (io_poll_get_ownership(req))
@@ -312,6 +359,9 @@ static int io_poll_check_events(struct io_kiocb *req, io_tw_token_t tw)
 	return IOU_POLL_NO_ACTION;
 }
 
+/**
+ * Task work handler for poll requests, processes poll events and completion.
+ */
 void io_poll_task_func(struct io_kiocb *req, io_tw_token_t tw)
 {
 	int ret;
@@ -357,6 +407,9 @@ void io_poll_task_func(struct io_kiocb *req, io_tw_token_t tw)
 	}
 }
 
+/**
+ * Cancel a poll request and trigger completion.
+ */
 static void io_poll_cancel_req(struct io_kiocb *req)
 {
 	io_poll_mark_cancelled(req);
@@ -366,6 +419,9 @@ static void io_poll_cancel_req(struct io_kiocb *req)
 
 #define IO_ASYNC_POLL_COMMON	(EPOLLONESHOT | EPOLLPRI)
 
+/**
+ * Handle POLLFREE wakeup for poll waitqueue, cancel and cleanup request.
+ */
 static __cold int io_pollfree_wake(struct io_kiocb *req, struct io_poll *poll)
 {
 	io_poll_mark_cancelled(req);
@@ -454,6 +510,9 @@ static bool io_poll_double_prepare(struct io_kiocb *req)
 	return !!head;
 }
 
+/**
+ * Internal helper to queue a poll wait entry, handling double poll if needed.
+ */
 static void __io_queue_proc(struct io_poll *poll, struct io_poll_table *pt,
 			    struct wait_queue_head *head,
 			    struct io_poll **poll_ptr)
@@ -511,6 +570,9 @@ static void __io_queue_proc(struct io_poll *poll, struct io_poll_table *pt,
 	}
 }
 
+/**
+ * Queue a poll wait entry for a poll request.
+ */
 static void io_poll_queue_proc(struct file *file, struct wait_queue_head *head,
 			       struct poll_table_struct *p)
 {
@@ -521,12 +583,18 @@ static void io_poll_queue_proc(struct file *file, struct wait_queue_head *head,
 			(struct io_poll **) &pt->req->async_data);
 }
 
+/**
+ * Check if poll can finish inline or needs to be scheduled.
+ */
 static bool io_poll_can_finish_inline(struct io_kiocb *req,
 				      struct io_poll_table *pt)
 {
 	return pt->owning || io_poll_get_ownership(req);
 }
 
+/**
+ * Add a poll request to the cancel hash table with locking.
+ */
 static void io_poll_add_hash(struct io_kiocb *req, unsigned int issue_flags)
 {
 	struct io_ring_ctx *ctx = req->ctx;
@@ -536,7 +604,7 @@ static void io_poll_add_hash(struct io_kiocb *req, unsigned int issue_flags)
 	io_ring_submit_unlock(ctx, issue_flags);
 }
 
-/*
+/**
  * Returns 0 when it's handed over for polling. The caller owns the requests if
  * it returns non-zero, but otherwise should not touch it. Negative values
  * contain an error code. When the result is >0, the polling has completed
@@ -627,6 +695,9 @@ static int __io_arm_poll_handler(struct io_kiocb *req,
 	return 0;
 }
 
+/**
+ * Queue a poll wait entry for an async poll request.
+ */
 static void io_async_queue_proc(struct file *file, struct wait_queue_head *head,
 			       struct poll_table_struct *p)
 {
@@ -642,8 +713,6 @@ static void io_async_queue_proc(struct file *file, struct wait_queue_head *head,
  * certain amount of retries before we give up. Given that this condition
  * should _rarely_ trigger even once, we should be fine with a larger value.
  */
-#define APOLL_MAX_RETRY		128
-
 static struct async_poll *io_req_alloc_apoll(struct io_kiocb *req,
 					     unsigned issue_flags)
 {
@@ -669,6 +738,9 @@ static struct async_poll *io_req_alloc_apoll(struct io_kiocb *req,
 	return apoll;
 }
 
+/**
+ * Arm a poll handler for a request, setting up async polling.
+ */
 int io_arm_poll_handler(struct io_kiocb *req, unsigned issue_flags)
 {
 	const struct io_issue_def *def = &io_issue_defs[req->opcode];
@@ -712,8 +784,10 @@ int io_arm_poll_handler(struct io_kiocb *req, unsigned issue_flags)
 	return IO_APOLL_OK;
 }
 
-/*
- * Returns true if we found and killed one or more poll requests
+/**
+ * Remove all poll requests for a context, optionally filtering by task.
+ *
+ * Returns true if we found and killed one or more poll requests.
  */
 __cold bool io_poll_remove_all(struct io_ring_ctx *ctx, struct io_uring_task *tctx,
 			       bool cancel_all)
@@ -740,6 +814,9 @@ __cold bool io_poll_remove_all(struct io_ring_ctx *ctx, struct io_uring_task *tc
 	return found;
 }
 
+/**
+ * Find a poll request by user data in the cancel hash table.
+ */
 static struct io_kiocb *io_poll_find(struct io_ring_ctx *ctx, bool poll_only,
 				     struct io_cancel_data *cd)
 {
@@ -761,6 +838,9 @@ static struct io_kiocb *io_poll_find(struct io_ring_ctx *ctx, bool poll_only,
 	return NULL;
 }
 
+/**
+ * Find a poll request by file descriptor in the cancel hash table.
+ */
 static struct io_kiocb *io_poll_file_find(struct io_ring_ctx *ctx,
 					  struct io_cancel_data *cd)
 {
@@ -779,6 +859,9 @@ static struct io_kiocb *io_poll_file_find(struct io_ring_ctx *ctx,
 	return NULL;
 }
 
+/**
+ * Disarm a poll request, removing it from its waitqueue and hash table.
+ */
 static int io_poll_disarm(struct io_kiocb *req)
 {
 	if (!req)
@@ -790,6 +873,9 @@ static int io_poll_disarm(struct io_kiocb *req)
 	return 0;
 }
 
+/**
+ * Cancel a poll request by user data or file descriptor.
+ */
 static int __io_poll_cancel(struct io_ring_ctx *ctx, struct io_cancel_data *cd)
 {
 	struct io_kiocb *req;
@@ -807,6 +893,9 @@ static int __io_poll_cancel(struct io_ring_ctx *ctx, struct io_cancel_data *cd)
 	return -ENOENT;
 }
 
+/**
+ * Cancel a poll request with locking.
+ */
 int io_poll_cancel(struct io_ring_ctx *ctx, struct io_cancel_data *cd,
 		   unsigned issue_flags)
 {
@@ -818,6 +907,9 @@ int io_poll_cancel(struct io_ring_ctx *ctx, struct io_cancel_data *cd,
 	return ret;
 }
 
+/**
+ * Parse poll events from an io_uring submission queue entry.
+ */
 static __poll_t io_poll_parse_events(const struct io_uring_sqe *sqe,
 				     unsigned int flags)
 {
@@ -835,6 +927,9 @@ static __poll_t io_poll_parse_events(const struct io_uring_sqe *sqe,
 		(events & (EPOLLEXCLUSIVE|EPOLLONESHOT|EPOLLET));
 }
 
+/**
+ * Prepare a poll remove request from an io_uring submission queue entry.
+ */
 int io_poll_remove_prep(struct io_kiocb *req, const struct io_uring_sqe *sqe)
 {
 	struct io_poll_update *upd = io_kiocb_to_cmd(req, struct io_poll_update);
@@ -865,6 +960,9 @@ int io_poll_remove_prep(struct io_kiocb *req, const struct io_uring_sqe *sqe)
 	return 0;
 }
 
+/**
+ * Prepare a poll add request from an io_uring submission queue entry.
+ */
 int io_poll_add_prep(struct io_kiocb *req, const struct io_uring_sqe *sqe)
 {
 	struct io_poll *poll = io_kiocb_to_cmd(req, struct io_poll);
@@ -882,6 +980,9 @@ int io_poll_add_prep(struct io_kiocb *req, const struct io_uring_sqe *sqe)
 	return 0;
 }
 
+/**
+ * Add a poll request to the waitqueue and hash table.
+ */
 int io_poll_add(struct io_kiocb *req, unsigned int issue_flags)
 {
 	struct io_poll *poll = io_kiocb_to_cmd(req, struct io_poll);
@@ -898,6 +999,9 @@ int io_poll_add(struct io_kiocb *req, unsigned int issue_flags)
 	return ret ?: IOU_ISSUE_SKIP_COMPLETE;
 }
 
+/**
+ * Remove a poll request and optionally update its events or user data.
+ */
 int io_poll_remove(struct io_kiocb *req, unsigned int issue_flags)
 {
 	struct io_poll_update *poll_update = io_kiocb_to_cmd(req, struct io_poll_update);

@@ -15,6 +15,9 @@
 #include "io_uring.h"
 #include "fs.h"
 
+/**
+ * Holds parameters for a rename operation, including file descriptors, paths, and flags.
+ */
 struct io_rename {
 	struct file			*file;
 	int				old_dfd;
@@ -24,6 +27,9 @@ struct io_rename {
 	int				flags;
 };
 
+/**
+ * Holds parameters for an unlink (remove file or directory) operation, including file descriptor, flags, and filename.
+ */
 struct io_unlink {
 	struct file			*file;
 	int				dfd;
@@ -31,6 +37,9 @@ struct io_unlink {
 	struct filename			*filename;
 };
 
+/**
+ * Holds parameters for a mkdir (make directory) operation, including file descriptor, mode, and filename.
+ */
 struct io_mkdir {
 	struct file			*file;
 	int				dfd;
@@ -38,6 +47,9 @@ struct io_mkdir {
 	struct filename			*filename;
 };
 
+/**
+ * Holds parameters for a link (hard link or symlink) operation, including file descriptors, paths, and flags.
+ */
 struct io_link {
 	struct file			*file;
 	int				old_dfd;
@@ -47,247 +59,274 @@ struct io_link {
 	int				flags;
 };
 
+// Prepares the data for the io_renameat operation
+// This function validates the input and prepares necessary structures for renaming a file.
 int io_renameat_prep(struct io_kiocb *req, const struct io_uring_sqe *sqe)
 {
-	struct io_rename *ren = io_kiocb_to_cmd(req, struct io_rename);
-	const char __user *oldf, *newf;
+    struct io_rename *ren = io_kiocb_to_cmd(req, struct io_rename);
+    const char __user *oldf, *newf;
 
-	if (sqe->buf_index || sqe->splice_fd_in)
-		return -EINVAL;
-	if (unlikely(req->flags & REQ_F_FIXED_FILE))
-		return -EBADF;
+    if (sqe->buf_index || sqe->splice_fd_in)
+        return -EINVAL;
+    if (unlikely(req->flags & REQ_F_FIXED_FILE))
+        return -EBADF;
 
-	ren->old_dfd = READ_ONCE(sqe->fd);
-	oldf = u64_to_user_ptr(READ_ONCE(sqe->addr));
-	newf = u64_to_user_ptr(READ_ONCE(sqe->addr2));
-	ren->new_dfd = READ_ONCE(sqe->len);
-	ren->flags = READ_ONCE(sqe->rename_flags);
+    ren->old_dfd = READ_ONCE(sqe->fd);
+    oldf = u64_to_user_ptr(READ_ONCE(sqe->addr));
+    newf = u64_to_user_ptr(READ_ONCE(sqe->addr2));
+    ren->new_dfd = READ_ONCE(sqe->len);
+    ren->flags = READ_ONCE(sqe->rename_flags);
 
-	ren->oldpath = getname(oldf);
-	if (IS_ERR(ren->oldpath))
-		return PTR_ERR(ren->oldpath);
+    ren->oldpath = getname(oldf);
+    if (IS_ERR(ren->oldpath))
+        return PTR_ERR(ren->oldpath);
 
-	ren->newpath = getname(newf);
-	if (IS_ERR(ren->newpath)) {
-		putname(ren->oldpath);
-		return PTR_ERR(ren->newpath);
-	}
+    ren->newpath = getname(newf);
+    if (IS_ERR(ren->newpath)) {
+        putname(ren->oldpath);
+        return PTR_ERR(ren->newpath);
+    }
 
-	req->flags |= REQ_F_NEED_CLEANUP;
-	req->flags |= REQ_F_FORCE_ASYNC;
-	return 0;
+    req->flags |= REQ_F_NEED_CLEANUP;
+    req->flags |= REQ_F_FORCE_ASYNC;
+    return 0;
 }
 
+// Executes the io_renameat operation
+// This function performs the actual renaming operation using do_renameat2.
 int io_renameat(struct io_kiocb *req, unsigned int issue_flags)
 {
-	struct io_rename *ren = io_kiocb_to_cmd(req, struct io_rename);
-	int ret;
+    struct io_rename *ren = io_kiocb_to_cmd(req, struct io_rename);
+    int ret;
 
-	WARN_ON_ONCE(issue_flags & IO_URING_F_NONBLOCK);
+    WARN_ON_ONCE(issue_flags & IO_URING_F_NONBLOCK);
 
-	ret = do_renameat2(ren->old_dfd, ren->oldpath, ren->new_dfd,
-				ren->newpath, ren->flags);
+    ret = do_renameat2(ren->old_dfd, ren->oldpath, ren->new_dfd,
+                       ren->newpath, ren->flags);
 
-	req->flags &= ~REQ_F_NEED_CLEANUP;
-	io_req_set_res(req, ret, 0);
-	return IOU_OK;
+    req->flags &= ~REQ_F_NEED_CLEANUP;
+    io_req_set_res(req, ret, 0);
+    return IOU_OK;
 }
 
+// Cleans up resources after io_renameat operation
+// This function releases the resources (memory) allocated for the old and new paths.
 void io_renameat_cleanup(struct io_kiocb *req)
 {
-	struct io_rename *ren = io_kiocb_to_cmd(req, struct io_rename);
+    struct io_rename *ren = io_kiocb_to_cmd(req, struct io_rename);
 
-	putname(ren->oldpath);
-	putname(ren->newpath);
+    putname(ren->oldpath);
+    putname(ren->newpath);
 }
 
+// Prepares the data for the io_unlinkat operation
+// This function validates the input and prepares necessary structures for unlinking a file.
 int io_unlinkat_prep(struct io_kiocb *req, const struct io_uring_sqe *sqe)
 {
-	struct io_unlink *un = io_kiocb_to_cmd(req, struct io_unlink);
-	const char __user *fname;
+    struct io_unlink *un = io_kiocb_to_cmd(req, struct io_unlink);
+    const char __user *fname;
 
-	if (sqe->off || sqe->len || sqe->buf_index || sqe->splice_fd_in)
-		return -EINVAL;
-	if (unlikely(req->flags & REQ_F_FIXED_FILE))
-		return -EBADF;
+    if (sqe->off || sqe->len || sqe->buf_index || sqe->splice_fd_in)
+        return -EINVAL;
+    if (unlikely(req->flags & REQ_F_FIXED_FILE))
+        return -EBADF;
 
-	un->dfd = READ_ONCE(sqe->fd);
+    un->dfd = READ_ONCE(sqe->fd);
+    un->flags = READ_ONCE(sqe->unlink_flags);
+    if (un->flags & ~AT_REMOVEDIR)
+        return -EINVAL;
 
-	un->flags = READ_ONCE(sqe->unlink_flags);
-	if (un->flags & ~AT_REMOVEDIR)
-		return -EINVAL;
+    fname = u64_to_user_ptr(READ_ONCE(sqe->addr));
+    un->filename = getname(fname);
+    if (IS_ERR(un->filename))
+        return PTR_ERR(un->filename);
 
-	fname = u64_to_user_ptr(READ_ONCE(sqe->addr));
-	un->filename = getname(fname);
-	if (IS_ERR(un->filename))
-		return PTR_ERR(un->filename);
-
-	req->flags |= REQ_F_NEED_CLEANUP;
-	req->flags |= REQ_F_FORCE_ASYNC;
-	return 0;
+    req->flags |= REQ_F_NEED_CLEANUP;
+    req->flags |= REQ_F_FORCE_ASYNC;
+    return 0;
 }
 
+// Executes the io_unlinkat operation
+// This function performs the unlink operation (or directory removal) based on the flags.
 int io_unlinkat(struct io_kiocb *req, unsigned int issue_flags)
 {
-	struct io_unlink *un = io_kiocb_to_cmd(req, struct io_unlink);
-	int ret;
+    struct io_unlink *un = io_kiocb_to_cmd(req, struct io_unlink);
+    int ret;
 
-	WARN_ON_ONCE(issue_flags & IO_URING_F_NONBLOCK);
+    WARN_ON_ONCE(issue_flags & IO_URING_F_NONBLOCK);
 
-	if (un->flags & AT_REMOVEDIR)
-		ret = do_rmdir(un->dfd, un->filename);
-	else
-		ret = do_unlinkat(un->dfd, un->filename);
+    if (un->flags & AT_REMOVEDIR)
+        ret = do_rmdir(un->dfd, un->filename);
+    else
+        ret = do_unlinkat(un->dfd, un->filename);
 
-	req->flags &= ~REQ_F_NEED_CLEANUP;
-	io_req_set_res(req, ret, 0);
-	return IOU_OK;
+    req->flags &= ~REQ_F_NEED_CLEANUP;
+    io_req_set_res(req, ret, 0);
+    return IOU_OK;
 }
 
+// Cleans up resources after io_unlinkat operation
+// This function releases the memory allocated for the filename.
 void io_unlinkat_cleanup(struct io_kiocb *req)
 {
-	struct io_unlink *ul = io_kiocb_to_cmd(req, struct io_unlink);
+    struct io_unlink *ul = io_kiocb_to_cmd(req, struct io_unlink);
 
-	putname(ul->filename);
+    putname(ul->filename);
 }
 
+// Prepares the data for the io_mkdirat operation
+// This function validates the input and prepares necessary structures for creating a directory.
 int io_mkdirat_prep(struct io_kiocb *req, const struct io_uring_sqe *sqe)
 {
-	struct io_mkdir *mkd = io_kiocb_to_cmd(req, struct io_mkdir);
-	const char __user *fname;
+    struct io_mkdir *mkd = io_kiocb_to_cmd(req, struct io_mkdir);
+    const char __user *fname;
 
-	if (sqe->off || sqe->rw_flags || sqe->buf_index || sqe->splice_fd_in)
-		return -EINVAL;
-	if (unlikely(req->flags & REQ_F_FIXED_FILE))
-		return -EBADF;
+    if (sqe->off || sqe->rw_flags || sqe->buf_index || sqe->splice_fd_in)
+        return -EINVAL;
+    if (unlikely(req->flags & REQ_F_FIXED_FILE))
+        return -EBADF;
 
-	mkd->dfd = READ_ONCE(sqe->fd);
-	mkd->mode = READ_ONCE(sqe->len);
+    mkd->dfd = READ_ONCE(sqe->fd);
+    mkd->mode = READ_ONCE(sqe->len);
 
-	fname = u64_to_user_ptr(READ_ONCE(sqe->addr));
-	mkd->filename = getname(fname);
-	if (IS_ERR(mkd->filename))
-		return PTR_ERR(mkd->filename);
+    fname = u64_to_user_ptr(READ_ONCE(sqe->addr));
+    mkd->filename = getname(fname);
+    if (IS_ERR(mkd->filename))
+        return PTR_ERR(mkd->filename);
 
-	req->flags |= REQ_F_NEED_CLEANUP;
-	req->flags |= REQ_F_FORCE_ASYNC;
-	return 0;
+    req->flags |= REQ_F_NEED_CLEANUP;
+    req->flags |= REQ_F_FORCE_ASYNC;
+    return 0;
 }
 
+// Executes the io_mkdirat operation
+// This function creates a directory using do_mkdirat.
 int io_mkdirat(struct io_kiocb *req, unsigned int issue_flags)
 {
-	struct io_mkdir *mkd = io_kiocb_to_cmd(req, struct io_mkdir);
-	int ret;
+    struct io_mkdir *mkd = io_kiocb_to_cmd(req, struct io_mkdir);
+    int ret;
 
-	WARN_ON_ONCE(issue_flags & IO_URING_F_NONBLOCK);
+    WARN_ON_ONCE(issue_flags & IO_URING_F_NONBLOCK);
 
-	ret = do_mkdirat(mkd->dfd, mkd->filename, mkd->mode);
+    ret = do_mkdirat(mkd->dfd, mkd->filename, mkd->mode);
 
-	req->flags &= ~REQ_F_NEED_CLEANUP;
-	io_req_set_res(req, ret, 0);
-	return IOU_OK;
+    req->flags &= ~REQ_F_NEED_CLEANUP;
+    io_req_set_res(req, ret, 0);
+    return IOU_OK;
 }
 
+// Cleans up resources after io_mkdirat operation
+// This function releases the memory allocated for the filename.
 void io_mkdirat_cleanup(struct io_kiocb *req)
 {
-	struct io_mkdir *md = io_kiocb_to_cmd(req, struct io_mkdir);
+    struct io_mkdir *md = io_kiocb_to_cmd(req, struct io_mkdir);
 
-	putname(md->filename);
+    putname(md->filename);
 }
 
+// Prepares the data for the io_symlinkat operation
+// This function validates the input and prepares necessary structures for creating a symlink.
 int io_symlinkat_prep(struct io_kiocb *req, const struct io_uring_sqe *sqe)
 {
-	struct io_link *sl = io_kiocb_to_cmd(req, struct io_link);
-	const char __user *oldpath, *newpath;
+    struct io_link *sl = io_kiocb_to_cmd(req, struct io_link);
+    const char __user *oldpath, *newpath;
 
-	if (sqe->len || sqe->rw_flags || sqe->buf_index || sqe->splice_fd_in)
-		return -EINVAL;
-	if (unlikely(req->flags & REQ_F_FIXED_FILE))
-		return -EBADF;
+    if (sqe->len || sqe->rw_flags || sqe->buf_index || sqe->splice_fd_in)
+        return -EINVAL;
+    if (unlikely(req->flags & REQ_F_FIXED_FILE))
+        return -EBADF;
 
-	sl->new_dfd = READ_ONCE(sqe->fd);
-	oldpath = u64_to_user_ptr(READ_ONCE(sqe->addr));
-	newpath = u64_to_user_ptr(READ_ONCE(sqe->addr2));
+    sl->new_dfd = READ_ONCE(sqe->fd);
+    oldpath = u64_to_user_ptr(READ_ONCE(sqe->addr));
+    newpath = u64_to_user_ptr(READ_ONCE(sqe->addr2));
 
-	sl->oldpath = getname(oldpath);
-	if (IS_ERR(sl->oldpath))
-		return PTR_ERR(sl->oldpath);
+    sl->oldpath = getname(oldpath);
+    if (IS_ERR(sl->oldpath))
+        return PTR_ERR(sl->oldpath);
 
-	sl->newpath = getname(newpath);
-	if (IS_ERR(sl->newpath)) {
-		putname(sl->oldpath);
-		return PTR_ERR(sl->newpath);
-	}
+    sl->newpath = getname(newpath);
+    if (IS_ERR(sl->newpath)) {
+        putname(sl->oldpath);
+        return PTR_ERR(sl->newpath);
+    }
 
-	req->flags |= REQ_F_NEED_CLEANUP;
-	req->flags |= REQ_F_FORCE_ASYNC;
-	return 0;
+    req->flags |= REQ_F_NEED_CLEANUP;
+    req->flags |= REQ_F_FORCE_ASYNC;
+    return 0;
 }
 
+// Executes the io_symlinkat operation
+// This function creates a symlink using do_symlinkat.
 int io_symlinkat(struct io_kiocb *req, unsigned int issue_flags)
 {
-	struct io_link *sl = io_kiocb_to_cmd(req, struct io_link);
-	int ret;
+    struct io_link *sl = io_kiocb_to_cmd(req, struct io_link);
+    int ret;
 
-	WARN_ON_ONCE(issue_flags & IO_URING_F_NONBLOCK);
+    WARN_ON_ONCE(issue_flags & IO_URING_F_NONBLOCK);
 
-	ret = do_symlinkat(sl->oldpath, sl->new_dfd, sl->newpath);
+    ret = do_symlinkat(sl->oldpath, sl->new_dfd, sl->newpath);
 
-	req->flags &= ~REQ_F_NEED_CLEANUP;
-	io_req_set_res(req, ret, 0);
-	return IOU_OK;
+    req->flags &= ~REQ_F_NEED_CLEANUP;
+    io_req_set_res(req, ret, 0);
+    return IOU_OK;
 }
 
+// Prepares the data for the io_linkat operation
+// This function validates the input and prepares necessary structures for creating a hard link.
 int io_linkat_prep(struct io_kiocb *req, const struct io_uring_sqe *sqe)
 {
-	struct io_link *lnk = io_kiocb_to_cmd(req, struct io_link);
-	const char __user *oldf, *newf;
+    struct io_link *lnk = io_kiocb_to_cmd(req, struct io_link);
+    const char __user *oldf, *newf;
 
-	if (sqe->buf_index || sqe->splice_fd_in)
-		return -EINVAL;
-	if (unlikely(req->flags & REQ_F_FIXED_FILE))
-		return -EBADF;
+    if (sqe->buf_index || sqe->splice_fd_in)
+        return -EINVAL;
+    if (unlikely(req->flags & REQ_F_FIXED_FILE))
+        return -EBADF;
 
-	lnk->old_dfd = READ_ONCE(sqe->fd);
-	lnk->new_dfd = READ_ONCE(sqe->len);
-	oldf = u64_to_user_ptr(READ_ONCE(sqe->addr));
-	newf = u64_to_user_ptr(READ_ONCE(sqe->addr2));
-	lnk->flags = READ_ONCE(sqe->hardlink_flags);
+    lnk->old_dfd = READ_ONCE(sqe->fd);
+    lnk->new_dfd = READ_ONCE(sqe->len);
+    oldf = u64_to_user_ptr(READ_ONCE(sqe->addr));
+    newf = u64_to_user_ptr(READ_ONCE(sqe->addr2));
+    lnk->flags = READ_ONCE(sqe->hardlink_flags);
 
-	lnk->oldpath = getname_uflags(oldf, lnk->flags);
-	if (IS_ERR(lnk->oldpath))
-		return PTR_ERR(lnk->oldpath);
+    lnk->oldpath = getname_uflags(oldf, lnk->flags);
+    if (IS_ERR(lnk->oldpath))
+        return PTR_ERR(lnk->oldpath);
 
-	lnk->newpath = getname(newf);
-	if (IS_ERR(lnk->newpath)) {
-		putname(lnk->oldpath);
-		return PTR_ERR(lnk->newpath);
-	}
+    lnk->newpath = getname(newf);
+    if (IS_ERR(lnk->newpath)) {
+        putname(lnk->oldpath);
+        return PTR_ERR(lnk->newpath);
+    }
 
-	req->flags |= REQ_F_NEED_CLEANUP;
-	req->flags |= REQ_F_FORCE_ASYNC;
-	return 0;
+    req->flags |= REQ_F_NEED_CLEANUP;
+    req->flags |= REQ_F_FORCE_ASYNC;
+    return 0;
 }
 
+// Executes the io_linkat operation
+// This function creates a hard link using do_linkat.
 int io_linkat(struct io_kiocb *req, unsigned int issue_flags)
 {
-	struct io_link *lnk = io_kiocb_to_cmd(req, struct io_link);
-	int ret;
+    struct io_link *lnk = io_kiocb_to_cmd(req, struct io_link);
+    int ret;
 
-	WARN_ON_ONCE(issue_flags & IO_URING_F_NONBLOCK);
+    WARN_ON_ONCE(issue_flags & IO_URING_F_NONBLOCK);
 
-	ret = do_linkat(lnk->old_dfd, lnk->oldpath, lnk->new_dfd,
-				lnk->newpath, lnk->flags);
+    ret = do_linkat(lnk->old_dfd, lnk->oldpath, lnk->new_dfd,
+                    lnk->newpath, lnk->flags);
 
-	req->flags &= ~REQ_F_NEED_CLEANUP;
-	io_req_set_res(req, ret, 0);
-	return IOU_OK;
+    req->flags &= ~REQ_F_NEED_CLEANUP;
+    io_req_set_res(req, ret, 0);
+    return IOU_OK;
 }
 
+// Cleans up resources after io_linkat operation
+// This function releases the memory allocated for the old and new paths.
 void io_link_cleanup(struct io_kiocb *req)
 {
-	struct io_link *sl = io_kiocb_to_cmd(req, struct io_link);
+    struct io_link *sl = io_kiocb_to_cmd(req, struct io_link);
 
-	putname(sl->oldpath);
-	putname(sl->newpath);
+    putname(sl->oldpath);
+    putname(sl->newpath);
 }

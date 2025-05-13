@@ -18,6 +18,10 @@
 #define IORING_MSG_RING_MASK		(IORING_MSG_RING_CQE_SKIP | \
 					IORING_MSG_RING_FLAGS_PASS)
 
+/**
+ * Holds parameters and state for a message ring operation, including source/target files,
+ * user data, command, file descriptors, flags, and callback for task work.
+ */
 struct io_msg {
 	struct file			*file;
 	struct file			*src_file;
@@ -33,19 +37,16 @@ struct io_msg {
 	u32 flags;
 };
 
+// Unlocks the context mutex of the specified io_ring_ctx
 static void io_double_unlock_ctx(struct io_ring_ctx *octx)
 {
 	mutex_unlock(&octx->uring_lock);
 }
 
+// Attempts to lock the context mutex of the specified io_ring_ctx
 static int io_lock_external_ctx(struct io_ring_ctx *octx,
 				unsigned int issue_flags)
 {
-	/*
-	 * To ensure proper ordering between the two ctxs, we can only
-	 * attempt a trylock on the target. If that fails and we already have
-	 * the source ctx lock, punt to io-wq.
-	 */
 	if (!(issue_flags & IO_URING_F_UNLOCKED)) {
 		if (!mutex_trylock(&octx->uring_lock))
 			return -EAGAIN;
@@ -55,6 +56,7 @@ static int io_lock_external_ctx(struct io_ring_ctx *octx,
 	return 0;
 }
 
+// Cleans up the msg ring structure, specifically closing the src_file
 void io_msg_ring_cleanup(struct io_kiocb *req)
 {
 	struct io_msg *msg = io_kiocb_to_cmd(req, struct io_msg);
@@ -66,11 +68,13 @@ void io_msg_ring_cleanup(struct io_kiocb *req)
 	msg->src_file = NULL;
 }
 
+// Determines if a message needs to be sent remotely
 static inline bool io_msg_need_remote(struct io_ring_ctx *target_ctx)
 {
 	return target_ctx->task_complete;
 }
 
+// Completes the task work for a message in the msg ring
 static void io_msg_tw_complete(struct io_kiocb *req, io_tw_token_t tw)
 {
 	struct io_ring_ctx *ctx = req->ctx;
@@ -86,6 +90,7 @@ static void io_msg_tw_complete(struct io_kiocb *req, io_tw_token_t tw)
 	percpu_ref_put(&ctx->refs);
 }
 
+// Posts a message remotely to the target context
 static int io_msg_remote_post(struct io_ring_ctx *ctx, struct io_kiocb *req,
 			      int res, u32 cflags, u64 user_data)
 {
@@ -104,6 +109,7 @@ static int io_msg_remote_post(struct io_ring_ctx *ctx, struct io_kiocb *req,
 	return 0;
 }
 
+// Gets an io_kiocb structure from the message context
 static struct io_kiocb *io_msg_get_kiocb(struct io_ring_ctx *ctx)
 {
 	struct io_kiocb *req = NULL;
@@ -117,6 +123,7 @@ static struct io_kiocb *io_msg_get_kiocb(struct io_ring_ctx *ctx)
 	return kmem_cache_alloc(req_cachep, GFP_KERNEL | __GFP_NOWARN | __GFP_ZERO);
 }
 
+// Handles remote posting of data for a message
 static int io_msg_data_remote(struct io_ring_ctx *target_ctx,
 			      struct io_msg *msg)
 {
@@ -134,6 +141,7 @@ static int io_msg_data_remote(struct io_ring_ctx *target_ctx,
 					msg->user_data);
 }
 
+// Prepares the message ring data for posting
 static int __io_msg_ring_data(struct io_ring_ctx *target_ctx,
 			      struct io_msg *msg, unsigned int issue_flags)
 {
@@ -165,6 +173,7 @@ static int __io_msg_ring_data(struct io_ring_ctx *target_ctx,
 	return ret;
 }
 
+// Handles the message ring data for posting by invoking appropriate operations
 static int io_msg_ring_data(struct io_kiocb *req, unsigned int issue_flags)
 {
 	struct io_ring_ctx *target_ctx = req->file->private_data;
@@ -173,6 +182,7 @@ static int io_msg_ring_data(struct io_kiocb *req, unsigned int issue_flags)
 	return __io_msg_ring_data(target_ctx, msg, issue_flags);
 }
 
+// Grabs the source file associated with a message
 static int io_msg_grab_file(struct io_kiocb *req, unsigned int issue_flags)
 {
 	struct io_msg *msg = io_kiocb_to_cmd(req, struct io_msg);
@@ -193,6 +203,7 @@ static int io_msg_grab_file(struct io_kiocb *req, unsigned int issue_flags)
 	return ret;
 }
 
+// Installs the file descriptor for a message completion
 static int io_msg_install_complete(struct io_kiocb *req, unsigned int issue_flags)
 {
 	struct io_ring_ctx *target_ctx = req->file->private_data;
@@ -212,19 +223,16 @@ static int io_msg_install_complete(struct io_kiocb *req, unsigned int issue_flag
 
 	if (msg->flags & IORING_MSG_RING_CQE_SKIP)
 		goto out_unlock;
-	/*
-	 * If this fails, the target still received the file descriptor but
-	 * wasn't notified of the fact. This means that if this request
-	 * completes with -EOVERFLOW, then the sender must ensure that a
-	 * later IORING_OP_MSG_RING delivers the message.
-	 */
+
 	if (!io_post_aux_cqe(target_ctx, msg->user_data, ret, 0))
 		ret = -EOVERFLOW;
+
 out_unlock:
 	io_double_unlock_ctx(target_ctx);
 	return ret;
 }
 
+// Callback function for completing the task work for a file descriptor message
 static void io_msg_tw_fd_complete(struct callback_head *head)
 {
 	struct io_msg *msg = container_of(head, struct io_msg, tw);
@@ -238,6 +246,7 @@ static void io_msg_tw_fd_complete(struct callback_head *head)
 	io_req_queue_tw_complete(req, ret);
 }
 
+// Handles remote completion for a file descriptor message
 static int io_msg_fd_remote(struct io_kiocb *req)
 {
 	struct io_ring_ctx *ctx = req->file->private_data;
@@ -254,6 +263,7 @@ static int io_msg_fd_remote(struct io_kiocb *req)
 	return IOU_ISSUE_SKIP_COMPLETE;
 }
 
+// Sends a file descriptor message
 static int io_msg_send_fd(struct io_kiocb *req, unsigned int issue_flags)
 {
 	struct io_ring_ctx *target_ctx = req->file->private_data;
@@ -277,6 +287,7 @@ static int io_msg_send_fd(struct io_kiocb *req, unsigned int issue_flags)
 	return io_msg_install_complete(req, issue_flags);
 }
 
+// Prepares the message ring structure for processing
 static int __io_msg_ring_prep(struct io_msg *msg, const struct io_uring_sqe *sqe)
 {
 	if (unlikely(sqe->buf_index || sqe->personality))
@@ -295,11 +306,13 @@ static int __io_msg_ring_prep(struct io_msg *msg, const struct io_uring_sqe *sqe
 	return 0;
 }
 
+// Prepares the message ring command structure for processing
 int io_msg_ring_prep(struct io_kiocb *req, const struct io_uring_sqe *sqe)
 {
 	return __io_msg_ring_prep(io_kiocb_to_cmd(req, struct io_msg), sqe);
 }
 
+// Processes the message ring request
 int io_msg_ring(struct io_kiocb *req, unsigned int issue_flags)
 {
 	struct io_msg *msg = io_kiocb_to_cmd(req, struct io_msg);
@@ -331,6 +344,7 @@ done:
 	return IOU_OK;
 }
 
+// Synchronizes the message ring request
 int io_uring_sync_msg_ring(struct io_uring_sqe *sqe)
 {
 	struct io_msg io_msg = { };
@@ -340,10 +354,6 @@ int io_uring_sync_msg_ring(struct io_uring_sqe *sqe)
 	if (unlikely(ret))
 		return ret;
 
-	/*
-	 * Only data sending supported, not IORING_MSG_SEND_FD as that one
-	 * doesn't make sense without a source ring to send files from.
-	 */
 	if (io_msg.cmd != IORING_MSG_DATA)
 		return -EINVAL;
 

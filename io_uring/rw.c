@@ -23,9 +23,19 @@
 #include "poll.h"
 #include "rw.h"
 
+/**
+ * Complete a read/write operation, handling results and cleanup.
+ */
 static void io_complete_rw(struct kiocb *kiocb, long res);
+
+/**
+ * Complete a read/write operation in polled mode, handling results and cleanup.
+ */
 static void io_complete_rw_iopoll(struct kiocb *kiocb, long res);
 
+/**
+ * Structure representing a read/write operation.
+ */
 struct io_rw {
 	/* NOTE: kiocb has the file as the first member, so don't do it here */
 	struct kiocb			kiocb;
@@ -34,6 +44,10 @@ struct io_rw {
 	rwf_t				flags;
 };
 
+/**
+ * Check if the file supports non-blocking (nowait) operations for the given poll mask.
+ * Returns true if supported, false otherwise.
+ */
 static bool io_file_supports_nowait(struct io_kiocb *req, __poll_t mask)
 {
 	/* If FMODE_NOWAIT is set for a file, we're golden */
@@ -49,6 +63,9 @@ static bool io_file_supports_nowait(struct io_kiocb *req, __poll_t mask)
 	return false;
 }
 
+/**
+ * Prepare a compat iovec buffer for buffer selection, copying length from userspace.
+ */
 static int io_iov_compat_buffer_select_prep(struct io_rw *rw)
 {
 	struct compat_iovec __user *uiov = u64_to_user_ptr(rw->addr);
@@ -60,6 +77,9 @@ static int io_iov_compat_buffer_select_prep(struct io_rw *rw)
 	return 0;
 }
 
+/**
+ * Prepare a normal iovec buffer for buffer selection, copying length from userspace.
+ */
 static int io_iov_buffer_select_prep(struct io_kiocb *req)
 {
 	struct iovec __user *uiov;
@@ -79,6 +99,10 @@ static int io_iov_buffer_select_prep(struct io_kiocb *req)
 	return 0;
 }
 
+/**
+ * Import a user iovec array into kernel space for read/write operations.
+ * Handles both single and multiple segment cases.
+ */
 static int io_import_vec(int ddir, struct io_kiocb *req,
 			 struct io_async_rw *io,
 			 const struct iovec __user *uvec,
@@ -106,6 +130,9 @@ static int io_import_vec(int ddir, struct io_kiocb *req,
 	return 0;
 }
 
+/**
+ * Import a user buffer for read/write, handling buffer selection and vector cases.
+ */
 static int __io_import_rw_buffer(int ddir, struct io_kiocb *req,
 			     struct io_async_rw *io,
 			     unsigned int issue_flags)
@@ -128,6 +155,9 @@ static int __io_import_rw_buffer(int ddir, struct io_kiocb *req,
 	return import_ubuf(ddir, buf, sqe_len, &io->iter);
 }
 
+/**
+ * Wrapper for __io_import_rw_buffer, saves iterator state after import.
+ */
 static inline int io_import_rw_buffer(int rw, struct io_kiocb *req,
 				      struct io_async_rw *io,
 				      unsigned int issue_flags)
@@ -142,6 +172,9 @@ static inline int io_import_rw_buffer(int rw, struct io_kiocb *req,
 	return 0;
 }
 
+/**
+ * Recycle the async read/write structure for reuse or cache, freeing iovec if needed.
+ */
 static void io_rw_recycle(struct io_kiocb *req, unsigned int issue_flags)
 {
 	struct io_async_rw *rw = req->async_data;
@@ -159,6 +192,9 @@ static void io_rw_recycle(struct io_kiocb *req, unsigned int issue_flags)
 	}
 }
 
+/**
+ * Cleanup resources for a read/write request, handling recycling and cleanup flags.
+ */
 static void io_req_rw_cleanup(struct io_kiocb *req, unsigned int issue_flags)
 {
 	/*
@@ -194,6 +230,10 @@ static void io_req_rw_cleanup(struct io_kiocb *req, unsigned int issue_flags)
 	}
 }
 
+/**
+ * Allocate and initialize the async read/write structure for a request.
+ * Returns 0 on success or -ENOMEM on failure.
+ */
 static int io_rw_alloc_async(struct io_kiocb *req)
 {
 	struct io_ring_ctx *ctx = req->ctx;
@@ -208,12 +248,18 @@ static int io_rw_alloc_async(struct io_kiocb *req)
 	return 0;
 }
 
+/**
+ * Save the state of metadata iterator and seed for async read/write.
+ */
 static inline void io_meta_save_state(struct io_async_rw *io)
 {
 	io->meta_state.seed = io->meta.seed;
 	iov_iter_save_state(&io->meta.iter, &io->meta_state.iter_meta);
 }
 
+/**
+ * Restore the state of metadata iterator and seed for async read/write.
+ */
 static inline void io_meta_restore(struct io_async_rw *io, struct kiocb *kiocb)
 {
 	if (kiocb->ki_flags & IOCB_HAS_METADATA) {
@@ -222,6 +268,9 @@ static inline void io_meta_restore(struct io_async_rw *io, struct kiocb *kiocb)
 	}
 }
 
+/**
+ * Prepare protection information (PI) for a read/write request from userspace attributes.
+ */
 static int io_prep_rw_pi(struct io_kiocb *req, struct io_rw *rw, int ddir,
 			 u64 attr_ptr, u64 attr_type_mask)
 {
@@ -249,6 +298,9 @@ static int io_prep_rw_pi(struct io_kiocb *req, struct io_rw *rw, int ddir,
 	return ret;
 }
 
+/**
+ * Prepare a read/write request from an SQE, including ioprio and PI attributes.
+ */
 static int __io_prep_rw(struct io_kiocb *req, const struct io_uring_sqe *sqe,
 			int ddir)
 {
@@ -300,6 +352,9 @@ static int __io_prep_rw(struct io_kiocb *req, const struct io_uring_sqe *sqe,
 	return 0;
 }
 
+/**
+ * Import buffers for a read/write request, handling buffer selection if needed.
+ */
 static int io_rw_do_import(struct io_kiocb *req, int ddir)
 {
 	if (io_do_buffer_select(req))
@@ -308,6 +363,9 @@ static int io_rw_do_import(struct io_kiocb *req, int ddir)
 	return io_import_rw_buffer(ddir, req, req->async_data, 0);
 }
 
+/**
+ * Prepare a read/write request, including buffer import and validation.
+ */
 static int io_prep_rw(struct io_kiocb *req, const struct io_uring_sqe *sqe,
 		      int ddir)
 {
@@ -320,16 +378,25 @@ static int io_prep_rw(struct io_kiocb *req, const struct io_uring_sqe *sqe,
 	return io_rw_do_import(req, ddir);
 }
 
+/**
+ * Prepare a read request from an SQE.
+ */
 int io_prep_read(struct io_kiocb *req, const struct io_uring_sqe *sqe)
 {
 	return io_prep_rw(req, sqe, ITER_DEST);
 }
 
+/**
+ * Prepare a write request from an SQE.
+ */
 int io_prep_write(struct io_kiocb *req, const struct io_uring_sqe *sqe)
 {
 	return io_prep_rw(req, sqe, ITER_SOURCE);
 }
 
+/**
+ * Prepare a vectored read/write request, including buffer selection validation.
+ */
 static int io_prep_rwv(struct io_kiocb *req, const struct io_uring_sqe *sqe,
 		       int ddir)
 {
@@ -348,16 +415,25 @@ static int io_prep_rwv(struct io_kiocb *req, const struct io_uring_sqe *sqe,
 	return io_iov_buffer_select_prep(req);
 }
 
+/**
+ * Prepare a vectored read request from an SQE.
+ */
 int io_prep_readv(struct io_kiocb *req, const struct io_uring_sqe *sqe)
 {
 	return io_prep_rwv(req, sqe, ITER_DEST);
 }
 
+/**
+ * Prepare a vectored write request from an SQE.
+ */
 int io_prep_writev(struct io_kiocb *req, const struct io_uring_sqe *sqe)
 {
 	return io_prep_rwv(req, sqe, ITER_SOURCE);
 }
 
+/**
+ * Initialize a fixed buffer for a read/write request, importing the buffer if needed.
+ */
 static int io_init_rw_fixed(struct io_kiocb *req, unsigned int issue_flags,
 			    int ddir)
 {
@@ -374,16 +450,25 @@ static int io_init_rw_fixed(struct io_kiocb *req, unsigned int issue_flags,
 	return ret;
 }
 
+/**
+ * Prepare a fixed buffer read request from an SQE.
+ */
 int io_prep_read_fixed(struct io_kiocb *req, const struct io_uring_sqe *sqe)
 {
 	return __io_prep_rw(req, sqe, ITER_DEST);
 }
 
+/**
+ * Prepare a fixed buffer write request from an SQE.
+ */
 int io_prep_write_fixed(struct io_kiocb *req, const struct io_uring_sqe *sqe)
 {
 	return __io_prep_rw(req, sqe, ITER_SOURCE);
 }
 
+/**
+ * Import a registered buffer vector for a read/write request.
+ */
 static int io_rw_import_reg_vec(struct io_kiocb *req,
 				struct io_async_rw *io,
 				int ddir, unsigned int issue_flags)
@@ -401,6 +486,9 @@ static int io_rw_import_reg_vec(struct io_kiocb *req,
 	return 0;
 }
 
+/**
+ * Prepare a registered buffer vector for a read/write request from userspace.
+ */
 static int io_rw_prep_reg_vec(struct io_kiocb *req)
 {
 	struct io_rw *rw = io_kiocb_to_cmd(req, struct io_rw);
@@ -411,6 +499,9 @@ static int io_rw_prep_reg_vec(struct io_kiocb *req)
 	return io_prep_reg_iovec(req, &io->vec, uvec, rw->len);
 }
 
+/**
+ * Prepare a fixed buffer vectored read request from an SQE.
+ */
 int io_prep_readv_fixed(struct io_kiocb *req, const struct io_uring_sqe *sqe)
 {
 	int ret;
@@ -421,6 +512,9 @@ int io_prep_readv_fixed(struct io_kiocb *req, const struct io_uring_sqe *sqe)
 	return io_rw_prep_reg_vec(req);
 }
 
+/**
+ * Prepare a fixed buffer vectored write request from an SQE.
+ */
 int io_prep_writev_fixed(struct io_kiocb *req, const struct io_uring_sqe *sqe)
 {
 	int ret;
@@ -455,12 +549,19 @@ int io_read_mshot_prep(struct io_kiocb *req, const struct io_uring_sqe *sqe)
 	return 0;
 }
 
+/**
+ * Cleanup resources for a vectored read/write request.
+ */
 void io_readv_writev_cleanup(struct io_kiocb *req)
 {
 	lockdep_assert_held(&req->ctx->uring_lock);
 	io_rw_recycle(req, 0);
 }
 
+/**
+ * Update file position for the request, handling stream and non-stream files.
+ * Returns a pointer to the position or NULL for stream files.
+ */
 static inline loff_t *io_kiocb_update_pos(struct io_kiocb *req)
 {
 	struct io_rw *rw = io_kiocb_to_cmd(req, struct io_rw);
@@ -478,6 +579,10 @@ static inline loff_t *io_kiocb_update_pos(struct io_kiocb *req)
 	return NULL;
 }
 
+/**
+ * Determine if a read/write request should be reissued (retried) based on context and file type.
+ * Returns true if it should be retried, false otherwise.
+ */
 static bool io_rw_should_reissue(struct io_kiocb *req)
 {
 #ifdef CONFIG_BLOCK
@@ -507,6 +612,9 @@ static bool io_rw_should_reissue(struct io_kiocb *req)
 #endif
 }
 
+/**
+ * End write accounting for a regular file after a write operation.
+ */
 static void io_req_end_write(struct io_kiocb *req)
 {
 	if (req->flags & REQ_F_ISREG) {
@@ -532,6 +640,9 @@ static void io_req_io_end(struct io_kiocb *req)
 	}
 }
 
+/**
+ * Common completion logic for read/write requests, handling reissue and failure cases.
+ */
 static void __io_complete_rw_common(struct io_kiocb *req, long res)
 {
 	if (res == req->cqe.res)
@@ -544,6 +655,9 @@ static void __io_complete_rw_common(struct io_kiocb *req, long res)
 	}
 }
 
+/**
+ * Adjust the result of a read/write operation to include any previously completed bytes.
+ */
 static inline int io_fixup_rw_res(struct io_kiocb *req, long res)
 {
 	struct io_async_rw *io = req->async_data;
@@ -578,6 +692,9 @@ void io_req_rw_complete(struct io_kiocb *req, io_tw_token_t tw)
 	io_req_task_complete(req, tw);
 }
 
+/**
+ * Complete a read/write operation, handling results and cleanup.
+ */
 static void io_complete_rw(struct kiocb *kiocb, long res)
 {
 	struct io_rw *rw = container_of(kiocb, struct io_rw, kiocb);
@@ -591,6 +708,9 @@ static void io_complete_rw(struct kiocb *kiocb, long res)
 	__io_req_task_work_add(req, IOU_F_TWQ_LAZY_WAKE);
 }
 
+/**
+ * Complete a read/write operation in polled mode, handling results and cleanup.
+ */
 static void io_complete_rw_iopoll(struct kiocb *kiocb, long res)
 {
 	struct io_rw *rw = container_of(kiocb, struct io_rw, kiocb);
@@ -609,6 +729,9 @@ static void io_complete_rw_iopoll(struct kiocb *kiocb, long res)
 	smp_store_release(&req->iopoll_completed, 1);
 }
 
+/**
+ * Complete a read/write request, handling async completion and error translation.
+ */
 static inline void io_rw_done(struct io_kiocb *req, ssize_t ret)
 {
 	struct io_rw *rw = io_kiocb_to_cmd(req, struct io_rw);
@@ -640,6 +763,9 @@ static inline void io_rw_done(struct io_kiocb *req, ssize_t ret)
 		io_complete_rw(&rw->kiocb, ret);
 }
 
+/**
+ * Finalize a kiocb request, updating file position and handling completion or async retry.
+ */
 static int kiocb_done(struct io_kiocb *req, ssize_t ret,
 		       unsigned int issue_flags)
 {
@@ -665,6 +791,9 @@ static int kiocb_done(struct io_kiocb *req, ssize_t ret,
 	return IOU_ISSUE_SKIP_COMPLETE;
 }
 
+/**
+ * Get the pointer to the file position for a kiocb, or NULL for stream files.
+ */
 static inline loff_t *io_kiocb_ppos(struct kiocb *kiocb)
 {
 	return (kiocb->ki_filp->f_mode & FMODE_STREAM) ? NULL : &kiocb->ki_pos;
@@ -749,6 +878,9 @@ static ssize_t loop_rw_iter(int ddir, struct io_rw *rw, struct iov_iter *iter)
  * do a thread based blocking retry of the operation. That's the unexpected
  * slow path.
  */
+/**
+ * Waitqueue callback for async buffered IO, queues a retry when the page is unlocked.
+ */
 static int io_async_buf_func(struct wait_queue_entry *wait, unsigned mode,
 			     int sync, void *arg)
 {
@@ -816,6 +948,9 @@ static bool io_rw_should_retry(struct io_kiocb *req)
 	return true;
 }
 
+/**
+ * Perform a read operation using the appropriate iterator method for the file.
+ */
 static inline int io_iter_do_read(struct io_rw *rw, struct iov_iter *iter)
 {
 	struct file *file = rw->kiocb.ki_filp;
@@ -828,12 +963,18 @@ static inline int io_iter_do_read(struct io_rw *rw, struct iov_iter *iter)
 		return -EINVAL;
 }
 
+/**
+ * Check if IO completion is needed for the request (regular file or block device).
+ */
 static bool need_complete_io(struct io_kiocb *req)
 {
 	return req->flags & REQ_F_ISREG ||
 		S_ISBLK(file_inode(req->file)->i_mode);
 }
 
+/**
+ * Initialize the file and kiocb for a read/write request, setting flags and metadata.
+ */
 static int io_rw_init_file(struct io_kiocb *req, fmode_t mode, int rw_type)
 {
 	struct io_rw *rw = io_kiocb_to_cmd(req, struct io_rw);
@@ -895,6 +1036,9 @@ static int io_rw_init_file(struct io_kiocb *req, fmode_t mode, int rw_type)
 	return 0;
 }
 
+/**
+ * Internal implementation of a read operation, handling buffer import, file setup, and retries.
+ */
 static int __io_read(struct io_kiocb *req, unsigned int issue_flags)
 {
 	bool force_nonblock = issue_flags & IO_URING_F_NONBLOCK;
@@ -1009,6 +1153,11 @@ done:
 	return ret;
 }
 
+/**
+ * Perform a read operation on the given file descriptor.
+ * Handles non-blocking mode, buffer management, and partial reads.
+ * Returns the number of bytes read or an error code.
+ */
 int io_read(struct io_kiocb *req, unsigned int issue_flags)
 {
 	int ret;
@@ -1020,6 +1169,11 @@ int io_read(struct io_kiocb *req, unsigned int issue_flags)
 	return ret;
 }
 
+/**
+ * Perform a multishot read operation (multiple reads with a single request).
+ * Only valid for files that support polling.
+ * Returns the operation status or an error code.
+ */
 int io_read_mshot(struct io_kiocb *req, unsigned int issue_flags)
 {
 	struct io_rw *rw = io_kiocb_to_cmd(req, struct io_rw);
@@ -1086,6 +1240,9 @@ int io_read_mshot(struct io_kiocb *req, unsigned int issue_flags)
 	return IOU_COMPLETE;
 }
 
+/**
+ * Start write accounting for a regular file, handling NOWAIT and locking.
+ */
 static bool io_kiocb_start_write(struct io_kiocb *req, struct kiocb *kiocb)
 {
 	struct inode *inode;
@@ -1105,6 +1262,11 @@ static bool io_kiocb_start_write(struct io_kiocb *req, struct kiocb *kiocb)
 	return ret;
 }
 
+/**
+ * Perform a write operation on the given file descriptor.
+ * Handles non-blocking mode, buffer management, and partial writes.
+ * Returns the number of bytes written or an error code.
+ */
 int io_write(struct io_kiocb *req, unsigned int issue_flags)
 {
 	bool force_nonblock = issue_flags & IO_URING_F_NONBLOCK;
@@ -1201,6 +1363,11 @@ ret_eagain:
 	}
 }
 
+/**
+ * Perform a read operation using a fixed (pre-registered) buffer.
+ * Manages pre-registered buffers for efficient I/O.
+ * Returns the number of bytes read or an error code.
+ */
 int io_read_fixed(struct io_kiocb *req, unsigned int issue_flags)
 {
 	int ret;
@@ -1212,6 +1379,11 @@ int io_read_fixed(struct io_kiocb *req, unsigned int issue_flags)
 	return io_read(req, issue_flags);
 }
 
+/**
+ * Perform a write operation using a fixed (pre-registered) buffer.
+ * Manages pre-registered buffers for efficient I/O.
+ * Returns the number of bytes written or an error code.
+ */
 int io_write_fixed(struct io_kiocb *req, unsigned int issue_flags)
 {
 	int ret;
@@ -1231,6 +1403,9 @@ void io_rw_fail(struct io_kiocb *req)
 	io_req_set_res(req, res, req->cqe.flags);
 }
 
+/**
+ * Perform classic io_uring polling for a request, handling both uring_cmd and normal IO.
+ */
 static int io_uring_classic_poll(struct io_kiocb *req, struct io_comp_batch *iob,
 				unsigned int poll_flags)
 {
@@ -1248,6 +1423,10 @@ static int io_uring_classic_poll(struct io_kiocb *req, struct io_comp_batch *iob
 	}
 }
 
+/**
+ * Sleep for a portion of the hybrid poll time to reduce CPU usage during polling.
+ * Returns the sleep time in nanoseconds.
+ */
 static u64 io_hybrid_iopoll_delay(struct io_ring_ctx *ctx, struct io_kiocb *req)
 {
 	struct hrtimer_sleeper timer;
@@ -1282,6 +1461,10 @@ static u64 io_hybrid_iopoll_delay(struct io_ring_ctx *ctx, struct io_kiocb *req)
 	return sleep_time;
 }
 
+/**
+ * Perform hybrid polling for a request, combining sleep and classic polling for latency optimization.
+ * Returns the result of the polling operation.
+ */
 static int io_uring_hybrid_poll(struct io_kiocb *req,
 				struct io_comp_batch *iob, unsigned int poll_flags)
 {
@@ -1303,6 +1486,10 @@ static int io_uring_hybrid_poll(struct io_kiocb *req,
 	return ret;
 }
 
+/**
+ * Perform I/O polling for the io_uring context, handling completions and hybrid polling if enabled.
+ * Returns the number of completed events or an error code.
+ */
 int io_do_iopoll(struct io_ring_ctx *ctx, bool force_nonspin)
 {
 	struct io_wq_work_node *pos, *start, *prev;
@@ -1375,6 +1562,9 @@ int io_do_iopoll(struct io_ring_ctx *ctx, bool force_nonspin)
 	return nr_events;
 }
 
+/**
+ * Free the memory and iovec resources used by an async read/write structure.
+ */
 void io_rw_cache_free(const void *entry)
 {
 	struct io_async_rw *rw = (struct io_async_rw *) entry;

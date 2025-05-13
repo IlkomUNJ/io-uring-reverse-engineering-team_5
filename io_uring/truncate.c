@@ -20,6 +20,10 @@ struct io_ftrunc {
 	loff_t				len;
 };
 
+/**
+ * Prepare the truncate operation by extracting the target length from the SQE and validating input fields.
+ * Sets up the request for asynchronous execution.
+ */
 int io_ftruncate_prep(struct io_kiocb *req, const struct io_uring_sqe *sqe)
 {
 	struct io_ftrunc *ft = io_kiocb_to_cmd(req, struct io_ftrunc);
@@ -34,6 +38,10 @@ int io_ftruncate_prep(struct io_kiocb *req, const struct io_uring_sqe *sqe)
 	return 0;
 }
 
+/**
+ * Execute the truncate operation using do_ftruncate, setting the result for the request.
+ * Handles the actual file truncation to the specified length.
+ */
 int io_ftruncate(struct io_kiocb *req, unsigned int issue_flags)
 {
 	struct io_ftrunc *ft = io_kiocb_to_cmd(req, struct io_ftrunc);

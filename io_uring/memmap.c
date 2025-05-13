@@ -14,6 +14,7 @@
 #include "kbuf.h"
 #include "rsrc.h"
 
+// Allocates compound pages for the given size and returns the address of the allocated memory, or an error pointer if allocation fails.
 static void *io_mem_alloc_compound(struct page **pages, int nr_pages,
 				   size_t size, gfp_t gfp)
 {
@@ -36,6 +37,7 @@ static void *io_mem_alloc_compound(struct page **pages, int nr_pages,
 	return page_address(page);
 }
 
+// Pins user pages in memory for the given user address and length and returns a pointer to the pinned pages, or an error pointer.
 struct page **io_pin_pages(unsigned long uaddr, unsigned long len, int *npages)
 {
 	unsigned long start, end, nr_pages;
@@ -87,6 +89,7 @@ enum {
 	IO_REGION_F_SINGLE_REF			= 4,
 };
 
+// Frees the memory region by unpinning or releasing pages and unmapping the region if necessary.
 void io_free_region(struct io_ring_ctx *ctx, struct io_mapped_region *mr)
 {
 	if (mr->pages) {
@@ -110,6 +113,7 @@ void io_free_region(struct io_ring_ctx *ctx, struct io_mapped_region *mr)
 	memset(mr, 0, sizeof(*mr));
 }
 
+// Initializes the pointer for the mapped region, using vmap if necessary for multiple pages.
 static int io_region_init_ptr(struct io_mapped_region *mr)
 {
 	struct io_imu_folio_data ifd;
@@ -130,6 +134,7 @@ static int io_region_init_ptr(struct io_mapped_region *mr)
 	return 0;
 }
 
+// Pins the pages of the mapped region provided by the user.
 static int io_region_pin_pages(struct io_ring_ctx *ctx,
 				struct io_mapped_region *mr,
 				struct io_uring_region_desc *reg)
@@ -149,6 +154,7 @@ static int io_region_pin_pages(struct io_ring_ctx *ctx,
 	return 0;
 }
 
+// Allocates pages for the mapped region and handles the necessary memory flags.
 static int io_region_allocate_pages(struct io_ring_ctx *ctx,
 				    struct io_mapped_region *mr,
 				    struct io_uring_region_desc *reg,
@@ -184,6 +190,7 @@ done:
 	return 0;
 }
 
+// Creates a memory region by either pinning user-provided pages or allocating pages as necessary.
 int io_create_region(struct io_ring_ctx *ctx, struct io_mapped_region *mr,
 		     struct io_uring_region_desc *reg,
 		     unsigned long mmap_offset)
@@ -233,6 +240,7 @@ out_free:
 	return ret;
 }
 
+// Creates a memory region safely for mmap, ensuring that no data races occur by temporarily copying the region data.
 int io_create_region_mmap_safe(struct io_ring_ctx *ctx, struct io_mapped_region *mr,
 				struct io_uring_region_desc *reg,
 				unsigned long mmap_offset)
@@ -254,6 +262,7 @@ int io_create_region_mmap_safe(struct io_ring_ctx *ctx, struct io_mapped_region 
 	return 0;
 }
 
+// Retrieves the memory region corresponding to the given offset for mmap, based on ring context.
 static struct io_mapped_region *io_mmap_get_region(struct io_ring_ctx *ctx,
 						   loff_t pgoff)
 {
@@ -277,6 +286,7 @@ static struct io_mapped_region *io_mmap_get_region(struct io_ring_ctx *ctx,
 	return NULL;
 }
 
+// Validates a memory-mapped region and ensures it's properly set up for the io_uring context.
 static void *io_region_validate_mmap(struct io_ring_ctx *ctx,
 				     struct io_mapped_region *mr)
 {
@@ -290,6 +300,7 @@ static void *io_region_validate_mmap(struct io_ring_ctx *ctx,
 	return io_region_get_ptr(mr);
 }
 
+// Validates an mmap request for io_uring and returns a valid pointer if the region is correctly mapped.
 static void *io_uring_validate_mmap_request(struct file *file, loff_t pgoff,
 					    size_t sz)
 {
@@ -304,6 +315,7 @@ static void *io_uring_validate_mmap_request(struct file *file, loff_t pgoff,
 
 #ifdef CONFIG_MMU
 
+// Maps the memory region for the io_ring context, inserting the pages into the vm_area_struct for the given address space.
 static int io_region_mmap(struct io_ring_ctx *ctx,
 			  struct io_mapped_region *mr,
 			  struct vm_area_struct *vma,
@@ -315,6 +327,7 @@ static int io_region_mmap(struct io_ring_ctx *ctx,
 	return vm_insert_pages(vma, vma->vm_start, mr->pages, &nr_pages);
 }
 
+// Performs memory mapping for io_uring, validating and handling the requested mmap for the given file and vma.
 __cold int io_uring_mmap(struct file *file, struct vm_area_struct *vma)
 {
 	struct io_ring_ctx *ctx = file->private_data;
@@ -341,6 +354,7 @@ __cold int io_uring_mmap(struct file *file, struct vm_area_struct *vma)
 	return io_region_mmap(ctx, region, vma, page_limit);
 }
 
+// Gets an unmapped area for io_uring mmap, handling different address and offset configurations.
 unsigned long io_uring_get_unmapped_area(struct file *filp, unsigned long addr,
 					 unsigned long len, unsigned long pgoff,
 					 unsigned long flags)
@@ -365,19 +379,11 @@ unsigned long io_uring_get_unmapped_area(struct file *filp, unsigned long addr,
 	/*
 	 * Some architectures have strong cache aliasing requirements.
 	 * For such architectures we need a coherent mapping which aliases
-	 * kernel memory *and* userspace memory. To achieve that:
-	 * - use a NULL file pointer to reference physical memory, and
-	 * - use the kernel virtual address of the shared io_uring context
-	 *   (instead of the userspace-provided address, which has to be 0UL
-	 *   anyway).
-	 * - use the same pgoff which the get_unmapped_area() uses to
-	 *   calculate the page colouring.
-	 * For architectures without such aliasing requirements, the
-	 * architecture will return any suitable mapping because addr is 0.
+	 * kernel memory *and* userspace memory.
 	 */
 	filp = NULL;
 	flags |= MAP_SHARED;
-	pgoff = 0;	/* has been translated to ptr above */
+	pgoff = 0;
 #ifdef SHM_COLOUR
 	addr = (uintptr_t) ptr;
 	pgoff = addr >> PAGE_SHIFT;
@@ -388,6 +394,8 @@ unsigned long io_uring_get_unmapped_area(struct file *filp, unsigned long addr,
 }
 
 #else /* !CONFIG_MMU */
+
+// Functions for non-MMU configurations, handling direct memory mapping capabilities for io_uring.
 
 int io_uring_mmap(struct file *file, struct vm_area_struct *vma)
 {
