@@ -14,5 +14,7 @@ Score is mainly calculated from individual contributions made to the commit. The
 - [Task 4](/function_documentation.md)
 
 ## Team Members
-- Member A
-- Member B
+- Muhammad Falih Ramadhan - 1313623010 (Falih26)
+- Fadhlulloh Nurul Fatih - 1313623040 (patihh)
+- Yehezkiel Tornagogo Lumbantoruan - 1313623070 (kiel)
+- Johannes Immanuel Simanjuntak - 1313623073 (johannesimmanuel)
