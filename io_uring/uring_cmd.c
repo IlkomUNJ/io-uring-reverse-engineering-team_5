@@ -16,6 +16,9 @@
 #include "rsrc.h"
 #include "uring_cmd.h"
 
+/**
+ * Free resources for an async uring command cache entry, including vector and memory.
+ */
 void io_cmd_cache_free(const void *entry)
 {
 	struct io_async_cmd *ac = (struct io_async_cmd *)entry;
@@ -24,6 +27,9 @@ void io_cmd_cache_free(const void *entry)
 	kfree(ac);
 }
 
+/**
+ * Cleanup and free resources for a uring command request, including async data and cache.
+ */
 static void io_req_uring_cleanup(struct io_kiocb *req, unsigned int issue_flags)
 {
 	struct io_uring_cmd *ioucmd = io_kiocb_to_cmd(req, struct io_uring_cmd);
@@ -49,11 +55,18 @@ static void io_req_uring_cleanup(struct io_kiocb *req, unsigned int issue_flags)
 	}
 }
 
+/**
+ * Cleanup a uring command request, releasing all associated resources.
+ */
 void io_uring_cmd_cleanup(struct io_kiocb *req)
 {
 	io_req_uring_cleanup(req, 0);
 }
 
+/**
+ * Try to cancel all cancelable uring commands for a given context and task.
+ * Returns true if any command was canceled.
+ */
 bool io_uring_try_cancel_uring_cmd(struct io_ring_ctx *ctx,
 				   struct io_uring_task *tctx, bool cancel_all)
 {
@@ -133,6 +146,9 @@ static void io_uring_cmd_work(struct io_kiocb *req, io_tw_token_t tw)
 	ioucmd->task_work_cb(ioucmd, flags);
 }
 
+/**
+ * Schedule uring command completion as task work, calling the provided callback.
+ */
 void __io_uring_cmd_do_in_task(struct io_uring_cmd *ioucmd,
 			void (*task_work_cb)(struct io_uring_cmd *, unsigned),
 			unsigned flags)
@@ -184,6 +200,10 @@ void io_uring_cmd_done(struct io_uring_cmd *ioucmd, ssize_t ret, u64 res2,
 }
 EXPORT_SYMBOL_GPL(io_uring_cmd_done);
 
+/**
+ * Prepare async data and cache the SQE for a uring command request.
+ * Returns 0 on success or negative error code.
+ */
 static int io_uring_cmd_prep_setup(struct io_kiocb *req,
 				   const struct io_uring_sqe *sqe)
 {
@@ -210,6 +230,10 @@ static int io_uring_cmd_prep_setup(struct io_kiocb *req,
 	return 0;
 }
 
+/**
+ * Prepare a uring command request from the SQE, validating flags and setting up async data.
+ * Returns 0 on success or negative error code.
+ */
 int io_uring_cmd_prep(struct io_kiocb *req, const struct io_uring_sqe *sqe)
 {
 	struct io_uring_cmd *ioucmd = io_kiocb_to_cmd(req, struct io_uring_cmd);
@@ -229,6 +253,10 @@ int io_uring_cmd_prep(struct io_kiocb *req, const struct io_uring_sqe *sqe)
 	return io_uring_cmd_prep_setup(req, sqe);
 }
 
+/**
+ * Issue a uring command by calling the file's uring_cmd operation, handling security and polling.
+ * Returns IOU_OK or error code.
+ */
 int io_uring_cmd(struct io_kiocb *req, unsigned int issue_flags)
 {
 	struct io_uring_cmd *ioucmd = io_kiocb_to_cmd(req, struct io_uring_cmd);
@@ -266,6 +294,10 @@ int io_uring_cmd(struct io_kiocb *req, unsigned int issue_flags)
 	return IOU_OK;
 }
 
+/**
+ * Import a fixed buffer for a uring command, preparing an iov_iter for the operation.
+ * Returns 0 on success or negative error code.
+ */
 int io_uring_cmd_import_fixed(u64 ubuf, unsigned long len, int rw,
 			      struct iov_iter *iter,
 			      struct io_uring_cmd *ioucmd,
@@ -277,6 +309,10 @@ int io_uring_cmd_import_fixed(u64 ubuf, unsigned long len, int rw,
 }
 EXPORT_SYMBOL_GPL(io_uring_cmd_import_fixed);
 
+/**
+ * Import a fixed vector of user buffers for a uring command, preparing an iov_iter for the operation.
+ * Returns 0 on success or negative error code.
+ */
 int io_uring_cmd_import_fixed_vec(struct io_uring_cmd *ioucmd,
 				  const struct iovec __user *uvec,
 				  size_t uvec_segs,
@@ -296,6 +332,9 @@ int io_uring_cmd_import_fixed_vec(struct io_uring_cmd *ioucmd,
 }
 EXPORT_SYMBOL_GPL(io_uring_cmd_import_fixed_vec);
 
+/**
+ * Queue a uring command request to the io-wq workqueue for execution in blocking context.
+ */
 void io_uring_cmd_issue_blocking(struct io_uring_cmd *ioucmd)
 {
 	struct io_kiocb *req = cmd_to_io_kiocb(ioucmd);
@@ -351,6 +390,10 @@ static inline int io_uring_cmd_setsockopt(struct socket *sock,
 }
 
 #if defined(CONFIG_NET)
+/**
+ * Handle socket-specific uring command operations such as SIOCINQ, SIOCOUTQ, GETSOCKOPT, and SETSOCKOPT.
+ * Returns result or error code.
+ */
 int io_uring_cmd_sock(struct io_uring_cmd *cmd, unsigned int issue_flags)
 {
 	struct socket *sock = cmd->file->private_data;

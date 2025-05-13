@@ -11,6 +11,10 @@
 #include "io_uring.h"
 #include "statx.h"
 
+/**
+ * Holds state for a statx operation, including file, directory fd, mask,
+ * flags, filename, and output buffer.
+ */
 struct io_statx {
 	struct file			*file;
 	int				dfd;
@@ -20,6 +24,11 @@ struct io_statx {
 	struct statx __user		*buffer;
 };
 
+/**
+ * Prepare statx operation parameters from the submission queue entry (SQE).
+ * Validates and extracts file descriptor, mask, path, flags, and output buffer.
+ * Sets up the request for asynchronous statx execution and cleanup.
+ */
 int io_statx_prep(struct io_kiocb *req, const struct io_uring_sqe *sqe)
 {
 	struct io_statx *sx = io_kiocb_to_cmd(req, struct io_statx);
@@ -50,6 +59,10 @@ int io_statx_prep(struct io_kiocb *req, const struct io_uring_sqe *sqe)
 	return 0;
 }
 
+/**
+ * Execute the statx system call with the prepared parameters.
+ * Retrieves file status and metadata, then sets the result for the request.
+ */
 int io_statx(struct io_kiocb *req, unsigned int issue_flags)
 {
 	struct io_statx *sx = io_kiocb_to_cmd(req, struct io_statx);
@@ -62,6 +75,9 @@ int io_statx(struct io_kiocb *req, unsigned int issue_flags)
 	return IOU_OK;
 }
 
+/**
+ * Cleanup resources allocated for the statx operation, such as filename.
+ */
 void io_statx_cleanup(struct io_kiocb *req)
 {
 	struct io_statx *sx = io_kiocb_to_cmd(req, struct io_statx);

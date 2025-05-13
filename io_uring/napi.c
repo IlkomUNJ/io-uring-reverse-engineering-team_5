@@ -8,6 +8,10 @@
 /* Timeout for cleanout of stale entries. */
 #define NAPI_TIMEOUT		(60 * SEC_CONVERSION)
 
+/**
+ * Represents a tracked NAPI (New API) polling entry for io_uring busy poll support.
+ * Stores the NAPI ID, timeout, list and hash nodes, and RCU head for safe deletion.
+ */
 struct io_napi_entry {
 	unsigned int		napi_id;
 	struct list_head	list;
@@ -18,6 +22,7 @@ struct io_napi_entry {
 	struct rcu_head		rcu;
 };
 
+// Find and return an io_napi_entry from the hash list based on napi_id.
 static struct io_napi_entry *io_napi_hash_find(struct hlist_head *hash_list,
 					       unsigned int napi_id)
 {
@@ -32,12 +37,14 @@ static struct io_napi_entry *io_napi_hash_find(struct hlist_head *hash_list,
 	return NULL;
 }
 
+// Convert net time to ktime format for comparison.
 static inline ktime_t net_to_ktime(unsigned long t)
 {
 	/* napi approximating usecs, reverse busy_loop_current_time */
 	return ns_to_ktime(t << 10);
 }
 
+// Add napi_id to the io_ring_ctx and return error codes as needed.
 int __io_napi_add_id(struct io_ring_ctx *ctx, unsigned int napi_id)
 {
 	struct hlist_head *hash_list;
@@ -81,6 +88,7 @@ int __io_napi_add_id(struct io_ring_ctx *ctx, unsigned int napi_id)
 	return 0;
 }
 
+// Delete napi_id from the io_ring_ctx and return error codes as needed.
 static int __io_napi_del_id(struct io_ring_ctx *ctx, unsigned int napi_id)
 {
 	struct hlist_head *hash_list;
@@ -102,6 +110,7 @@ static int __io_napi_del_id(struct io_ring_ctx *ctx, unsigned int napi_id)
 	return 0;
 }
 
+// Remove stale napi entries that have timed out.
 static void __io_napi_remove_stale(struct io_ring_ctx *ctx)
 {
 	struct io_napi_entry *e;
@@ -117,17 +126,19 @@ static void __io_napi_remove_stale(struct io_ring_ctx *ctx)
 		if (time_after(jiffies, READ_ONCE(e->timeout))) {
 			list_del_rcu(&e->list);
 			hash_del_rcu(&e->node);
-			kfree_rcu(e, rcu);
+			kfree_rcu(e, rcpu);
 		}
 	}
 }
 
+// Call __io_napi_remove_stale if is_stale is true.
 static inline void io_napi_remove_stale(struct io_ring_ctx *ctx, bool is_stale)
 {
 	if (is_stale)
 		__io_napi_remove_stale(ctx);
 }
 
+// Check if the busy loop has exceeded the timeout.
 static inline bool io_napi_busy_loop_timeout(ktime_t start_time,
 					     ktime_t bp)
 {
@@ -141,6 +152,7 @@ static inline bool io_napi_busy_loop_timeout(ktime_t start_time,
 	return true;
 }
 
+// Determine if the busy loop should end based on various conditions.
 static bool io_napi_busy_loop_should_end(void *data,
 					 unsigned long start_time)
 {
@@ -172,6 +184,7 @@ static bool static_tracking_do_busy_loop(struct io_ring_ctx *ctx,
 	return false;
 }
 
+// Perform busy loop for dynamic tracking and return if any stale entries were found.
 static bool
 dynamic_tracking_do_busy_loop(struct io_ring_ctx *ctx,
 			      bool (*loop_end)(void *, unsigned long),
@@ -191,6 +204,7 @@ dynamic_tracking_do_busy_loop(struct io_ring_ctx *ctx,
 	return is_stale;
 }
 
+// Depending on napi tracking mode, either perform static or dynamic tracking.
 static inline bool
 __io_napi_do_busy_loop(struct io_ring_ctx *ctx,
 		       bool (*loop_end)(void *, unsigned long),
@@ -201,6 +215,7 @@ __io_napi_do_busy_loop(struct io_ring_ctx *ctx,
 	return dynamic_tracking_do_busy_loop(ctx, loop_end, loop_end_arg);
 }
 
+// Execute the blocking busy poll loop, removing stale entries if needed.
 static void io_napi_blocking_busy_loop(struct io_ring_ctx *ctx,
 				       struct io_wait_queue *iowq)
 {
@@ -260,9 +275,10 @@ void io_napi_free(struct io_ring_ctx *ctx)
 		hash_del_rcu(&e->node);
 		kfree_rcu(e, rcu);
 	}
-	INIT_LIST_HEAD_RCU(&ctx->napi_list);
+	INIT_LIST_HEAD_RCPU(&ctx->napi_list);
 }
 
+// Register napi settings in the io-uring context.
 static int io_napi_register_napi(struct io_ring_ctx *ctx,
 				 struct io_uring_napi *napi)
 {
@@ -374,7 +390,7 @@ void __io_napi_busy_loop(struct io_ring_ctx *ctx, struct io_wait_queue *iowq)
  * io_napi_sqpoll_busy_poll() - busy poll loop for sqpoll
  * @ctx: pointer to io-uring context structure
  *
- * Splice of the napi list and execute the napi busy poll loop.
+ * Splice off the napi list and execute the napi busy poll loop.
  */
 int io_napi_sqpoll_busy_poll(struct io_ring_ctx *ctx)
 {

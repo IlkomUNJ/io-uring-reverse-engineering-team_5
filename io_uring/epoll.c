@@ -12,6 +12,9 @@
 #include "io_uring.h"
 #include "epoll.h"
 
+/**
+ * Holds parameters for an epoll_ctl operation, including file, epoll fd, operation, target fd, and event.
+ */
 struct io_epoll {
 	struct file			*file;
 	int				epfd;
@@ -20,12 +23,16 @@ struct io_epoll {
 	struct epoll_event		event;
 };
 
+/**
+ * Holds parameters for an epoll_wait operation, including file, max events, and user event buffer pointer.
+ */
 struct io_epoll_wait {
 	struct file			*file;
 	int				maxevents;
 	struct epoll_event __user	*events;
 };
 
+// Prepares epoll_ctl data from SQE (epfd, op, fd, and event if provided).
 int io_epoll_ctl_prep(struct io_kiocb *req, const struct io_uring_sqe *sqe)
 {
 	struct io_epoll *epoll = io_kiocb_to_cmd(req, struct io_epoll);
@@ -68,6 +75,7 @@ int io_epoll_ctl(struct io_kiocb *req, unsigned int issue_flags)
 	return IOU_OK;
 }
 
+// Prepares epoll_wait data from SQE (event count and user buffer pointer).
 int io_epoll_wait_prep(struct io_kiocb *req, const struct io_uring_sqe *sqe)
 {
 	struct io_epoll_wait *iew = io_kiocb_to_cmd(req, struct io_epoll_wait);
@@ -80,6 +88,7 @@ int io_epoll_wait_prep(struct io_kiocb *req, const struct io_uring_sqe *sqe)
 	return 0;
 }
 
+// Sends available epoll events to user buffer or returns EAGAIN if none available.
 int io_epoll_wait(struct io_kiocb *req, unsigned int issue_flags)
 {
 	struct io_epoll_wait *iew = io_kiocb_to_cmd(req, struct io_epoll_wait);

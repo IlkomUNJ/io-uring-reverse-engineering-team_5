@@ -2,6 +2,11 @@
 #ifndef IOU_OP_DEF_H
 #define IOU_OP_DEF_H
 
+/**
+ * io_issue_def - Describes the properties and handlers for an io_uring opcode.
+ * Contains flags for operation requirements, async data size, and pointers to
+ * the preparation and issue functions for the opcode.
+ */
 struct io_issue_def {
 	/* needs req->file assigned */
 	unsigned		needs_file : 1;
@@ -35,6 +40,10 @@ struct io_issue_def {
 	int (*prep)(struct io_kiocb *, const struct io_uring_sqe *);
 };
 
+/**
+ * io_cold_def - Provides cold-path metadata for an io_uring opcode.
+ * Contains the operation name and optional cleanup/failure handlers.
+ */
 struct io_cold_def {
 	const char		*name;
 
@@ -42,10 +51,25 @@ struct io_cold_def {
 	void (*fail)(struct io_kiocb *);
 };
 
+/**
+ * io_issue_defs - Table of opcode definitions for io_uring operations.
+ * Maps each opcode to its properties, preparation, and issue handlers.
+ */
 extern const struct io_issue_def io_issue_defs[];
+
+/**
+ * io_cold_defs - Table of cold-path metadata for io_uring operations.
+ * Maps each opcode to its name and optional cleanup/failure handlers.
+ */
 extern const struct io_cold_def io_cold_defs[];
 
+/**
+ * Returns true if the given io_uring opcode is supported by the kernel.
+ */
 bool io_uring_op_supported(u8 opcode);
 
+/**
+ * Initializes the io_uring opcode definition tables and checks for consistency.
+ */
 void io_uring_optable_init(void);
 #endif

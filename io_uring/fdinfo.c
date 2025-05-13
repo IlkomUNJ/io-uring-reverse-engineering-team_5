@@ -16,6 +16,8 @@
 #include "rsrc.h"
 
 #ifdef CONFIG_PROC_FS
+
+// Displays credential information (UID, GID, groups, and capabilities) to /proc
 static __cold int io_uring_show_cred(struct seq_file *m, unsigned int id,
 		const struct cred *cred)
 {
@@ -47,6 +49,8 @@ static __cold int io_uring_show_cred(struct seq_file *m, unsigned int id,
 }
 
 #ifdef CONFIG_NET_RX_BUSY_POLL
+
+// Displays NAPI tracking status in general (used by static & dynamic mode)
 static __cold void common_tracking_show_fdinfo(struct io_ring_ctx *ctx,
 					       struct seq_file *m,
 					       const char *tracking_strategy)
@@ -60,6 +64,7 @@ static __cold void common_tracking_show_fdinfo(struct io_ring_ctx *ctx,
 		seq_puts(m, "napi_prefer_busy_poll:\tfalse\n");
 }
 
+// Displays NAPI tracking status for io_uring (enabled/disabled + mode)
 static __cold void napi_show_fdinfo(struct io_ring_ctx *ctx,
 				    struct seq_file *m)
 {
@@ -80,16 +85,14 @@ static __cold void napi_show_fdinfo(struct io_ring_ctx *ctx,
 	}
 }
 #else
+// Dummy if CONFIG_NET_RX_BUSY_POLL is not enabled
 static inline void napi_show_fdinfo(struct io_ring_ctx *ctx,
 				    struct seq_file *m)
 {
 }
 #endif
 
-/*
- * Caller holds a reference to the file already, we don't need to do
- * anything else to get an extra reference.
- */
+// Main function to display internal io_uring information to fdinfo in /proc
 __cold void io_uring_show_fdinfo(struct seq_file *m, struct file *file)
 {
 	struct io_ring_ctx *ctx = file->private_data;
@@ -114,12 +117,6 @@ __cold void io_uring_show_fdinfo(struct seq_file *m, struct file *file)
 	if (ctx->flags & IORING_SETUP_SQE128)
 		sq_shift = 1;
 
-	/*
-	 * we may get imprecise sqe and cqe info if uring is actively running
-	 * since we get cached_sq_head and cached_cq_tail without uring_lock
-	 * and sq_tail and cq_head are changed by userspace. But it's ok since
-	 * we usually use these info when it is stuck.
-	 */
 	seq_printf(m, "SqMask:\t0x%x\n", sq_mask);
 	seq_printf(m, "SqHead:\t%u\n", sq_head);
 	seq_printf(m, "SqTail:\t%u\n", sq_tail);
@@ -176,21 +173,11 @@ __cold void io_uring_show_fdinfo(struct seq_file *m, struct file *file)
 		seq_printf(m, "\n");
 	}
 
-	/*
-	 * Avoid ABBA deadlock between the seq lock and the io_uring mutex,
-	 * since fdinfo case grabs it in the opposite direction of normal use
-	 * cases. If we fail to get the lock, we just don't iterate any
-	 * structures that could be going away outside the io_uring mutex.
-	 */
 	has_lock = mutex_trylock(&ctx->uring_lock);
 
 	if (has_lock && (ctx->flags & IORING_SETUP_SQPOLL)) {
 		struct io_sq_data *sq = ctx->sq_data;
 
-		/*
-		 * sq->thread might be NULL if we raced with the sqpoll
-		 * thread termination.
-		 */
 		if (sq->thread) {
 			sq_pid = sq->task_pid;
 			sq_cpu = sq->sq_cpu;

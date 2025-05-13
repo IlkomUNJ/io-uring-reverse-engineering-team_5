@@ -19,14 +19,20 @@
 #include "futex.h"
 #include "cancel.h"
 
+// SPDX-License-Identifier: GPL-2.0
+
+#include "cancel.h"
+
+// Structure to represent an I/O cancel operation.
 struct io_cancel {
-	struct file			*file;
-	u64				addr;
-	u32				flags;
-	s32				fd;
-	u8				opcode;
+	struct file			*file;		// Associated file descriptor
+	u64				addr;		// Address of the request
+	u32				flags;		// Flags for the cancel operation
+	s32				fd;		// File descriptor to be canceled
+	u8				opcode;		// Opcode of the operation
 };
 
+// Macro defining possible cancel flags for the I/O cancellation.
 #define CANCEL_FLAGS	(IORING_ASYNC_CANCEL_ALL | IORING_ASYNC_CANCEL_FD | \
 			 IORING_ASYNC_CANCEL_ANY | IORING_ASYNC_CANCEL_FD_FIXED | \
 			 IORING_ASYNC_CANCEL_USERDATA | IORING_ASYNC_CANCEL_OP)
@@ -65,6 +71,7 @@ check_seq:
 	return true;
 }
 
+// Callback function used by the workqueue to match the request against cancel data.
 static bool io_cancel_cb(struct io_wq_work *work, void *data)
 {
 	struct io_kiocb *req = container_of(work, struct io_kiocb, work);
@@ -73,6 +80,7 @@ static bool io_cancel_cb(struct io_wq_work *work, void *data)
 	return io_cancel_req_match(req, cd);
 }
 
+// Attempts to cancel a single I/O request asynchronously.
 static int io_async_cancel_one(struct io_uring_task *tctx,
 			       struct io_cancel_data *cd)
 {
@@ -100,6 +108,7 @@ static int io_async_cancel_one(struct io_uring_task *tctx,
 	return ret;
 }
 
+// Tries to cancel a request asynchronously and falls back to other cancellation methods if needed.
 int io_try_cancel(struct io_uring_task *tctx, struct io_cancel_data *cd,
 		  unsigned issue_flags)
 {
@@ -109,10 +118,6 @@ int io_try_cancel(struct io_uring_task *tctx, struct io_cancel_data *cd,
 	WARN_ON_ONCE(!io_wq_current_is_worker() && tctx != current->io_uring);
 
 	ret = io_async_cancel_one(tctx, cd);
-	/*
-	 * Fall-through even for -EALREADY, as we may have poll armed
-	 * that need unarming.
-	 */
 	if (!ret)
 		return 0;
 
@@ -135,6 +140,7 @@ int io_try_cancel(struct io_uring_task *tctx, struct io_cancel_data *cd,
 	return ret;
 }
 
+// Prepares the cancel data for an asynchronous cancel operation.
 int io_async_cancel_prep(struct io_kiocb *req, const struct io_uring_sqe *sqe)
 {
 	struct io_cancel *cancel = io_kiocb_to_cmd(req, struct io_cancel);
@@ -162,6 +168,7 @@ int io_async_cancel_prep(struct io_kiocb *req, const struct io_uring_sqe *sqe)
 	return 0;
 }
 
+// Internal function to perform asynchronous cancel by processing all I/O requests.
 static int __io_async_cancel(struct io_cancel_data *cd,
 			     struct io_uring_task *tctx,
 			     unsigned int issue_flags)
@@ -195,6 +202,7 @@ static int __io_async_cancel(struct io_cancel_data *cd,
 	return all ? nr : ret;
 }
 
+// Perform an asynchronous cancel operation on the I/O request.
 int io_async_cancel(struct io_kiocb *req, unsigned int issue_flags)
 {
 	struct io_cancel *cancel = io_kiocb_to_cmd(req, struct io_cancel);
@@ -232,6 +240,7 @@ done:
 	return IOU_OK;
 }
 
+// Internal function to handle synchronous cancel operation.
 static int __io_sync_cancel(struct io_uring_task *tctx,
 			    struct io_cancel_data *cd, int fd)
 {
@@ -253,6 +262,7 @@ static int __io_sync_cancel(struct io_uring_task *tctx,
 	return __io_async_cancel(cd, tctx, 0);
 }
 
+// Handles synchronous cancellation for an I/O operation.
 int io_sync_cancel(struct io_ring_ctx *ctx, void __user *arg)
 	__must_hold(&ctx->uring_lock)
 {
@@ -342,6 +352,7 @@ out:
 	return ret;
 }
 
+// Removes all matching canceled requests from the list and applies the cancel callback.
 bool io_cancel_remove_all(struct io_ring_ctx *ctx, struct io_uring_task *tctx,
 			  struct hlist_head *list, bool cancel_all,
 			  bool (*cancel)(struct io_kiocb *))
@@ -363,6 +374,7 @@ bool io_cancel_remove_all(struct io_ring_ctx *ctx, struct io_uring_task *tctx,
 	return found;
 }
 
+// Removes and cancels matching requests from the provided list.
 int io_cancel_remove(struct io_ring_ctx *ctx, struct io_cancel_data *cd,
 		     unsigned int issue_flags, struct hlist_head *list,
 		     bool (*cancel)(struct io_kiocb *))
@@ -383,3 +395,4 @@ int io_cancel_remove(struct io_ring_ctx *ctx, struct io_cancel_data *cd,
 	io_ring_submit_unlock(ctx, issue_flags);
 	return nr ?: -ENOENT;
 }
+

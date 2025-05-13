@@ -11,11 +11,14 @@
 #include <uapi/linux/io_uring.h>
 
 #include "../fs/internal.h"
-
 #include "io_uring.h"
 #include "rsrc.h"
 #include "openclose.h"
 
+/**
+ * Holds state for an open operation, including file, directory fd, filename,
+ * open flags, and resource limits.
+ */
 struct io_open {
 	struct file			*file;
 	int				dfd;
@@ -25,28 +28,34 @@ struct io_open {
 	unsigned long			nofile;
 };
 
+/**
+ * Holds state for a close operation, including file and file descriptor info.
+ */
 struct io_close {
 	struct file			*file;
 	int				fd;
 	u32				file_slot;
 };
 
+/**
+ * Holds state for installing a file into the fixed file table.
+ */
 struct io_fixed_install {
 	struct file			*file;
 	unsigned int			o_flags;
 };
 
+/*
+ * io_openat_force_async() - Determines if open should be forced async based on flags.
+ */
 static bool io_openat_force_async(struct io_open *open)
 {
-	/*
-	 * Don't bother trying for O_TRUNC, O_CREAT, or O_TMPFILE open,
-	 * it'll always -EAGAIN. Note that we test for __O_TMPFILE because
-	 * O_TMPFILE includes O_DIRECTORY, which isn't a flag we need to force
-	 * async for.
-	 */
 	return open->how.flags & (O_TRUNC | O_CREAT | __O_TMPFILE);
 }
 
+/*
+ * __io_openat_prep() - Prepares open request by extracting fields and checking constraints.
+ */
 static int __io_openat_prep(struct io_kiocb *req, const struct io_uring_sqe *sqe)
 {
 	struct io_open *open = io_kiocb_to_cmd(req, struct io_open);
@@ -58,7 +67,6 @@ static int __io_openat_prep(struct io_kiocb *req, const struct io_uring_sqe *sqe
 	if (unlikely(req->flags & REQ_F_FIXED_FILE))
 		return -EBADF;
 
-	/* open.how should be already initialised */
 	if (!(open->how.flags & O_PATH) && force_o_largefile())
 		open->how.flags |= O_LARGEFILE;
 
@@ -82,6 +90,9 @@ static int __io_openat_prep(struct io_kiocb *req, const struct io_uring_sqe *sqe
 	return 0;
 }
 
+/*
+ * io_openat_prep() - Parses and prepares openat request from sqe.
+ */
 int io_openat_prep(struct io_kiocb *req, const struct io_uring_sqe *sqe)
 {
 	struct io_open *open = io_kiocb_to_cmd(req, struct io_open);
@@ -92,6 +103,9 @@ int io_openat_prep(struct io_kiocb *req, const struct io_uring_sqe *sqe)
 	return __io_openat_prep(req, sqe);
 }
 
+/*
+ * io_openat2_prep() - Prepares openat2 request using user-provided open_how structure.
+ */
 int io_openat2_prep(struct io_kiocb *req, const struct io_uring_sqe *sqe)
 {
 	struct io_open *open = io_kiocb_to_cmd(req, struct io_open);
@@ -111,6 +125,9 @@ int io_openat2_prep(struct io_kiocb *req, const struct io_uring_sqe *sqe)
 	return __io_openat_prep(req, sqe);
 }
 
+/*
+ * io_openat2() - Handles openat2 operation, including file allocation and installation.
+ */
 int io_openat2(struct io_kiocb *req, unsigned int issue_flags)
 {
 	struct io_open *open = io_kiocb_to_cmd(req, struct io_open);
@@ -139,16 +156,10 @@ int io_openat2(struct io_kiocb *req, unsigned int issue_flags)
 
 	file = do_filp_open(open->dfd, open->filename, &op);
 	if (IS_ERR(file)) {
-		/*
-		 * We could hang on to this 'fd' on retrying, but seems like
-		 * marginal gain for something that is now known to be a slower
-		 * path. So just put it, and we'll get a new one when we retry.
-		 */
 		if (!fixed)
 			put_unused_fd(ret);
 
 		ret = PTR_ERR(file);
-		/* only retry if RESOLVE_CACHED wasn't already set by application */
 		if (ret == -EAGAIN &&
 		    (!resolve_nonblock && (issue_flags & IO_URING_F_NONBLOCK)))
 			return -EAGAIN;
@@ -172,11 +183,17 @@ err:
 	return IOU_OK;
 }
 
+/*
+ * io_openat() - Wrapper for io_openat2().
+ */
 int io_openat(struct io_kiocb *req, unsigned int issue_flags)
 {
 	return io_openat2(req, issue_flags);
 }
 
+/*
+ * io_open_cleanup() - Cleans up allocated resources in open request.
+ */
 void io_open_cleanup(struct io_kiocb *req)
 {
 	struct io_open *open = io_kiocb_to_cmd(req, struct io_open);
@@ -185,6 +202,9 @@ void io_open_cleanup(struct io_kiocb *req)
 		putname(open->filename);
 }
 
+/*
+ * __io_close_fixed() - Closes a fixed file descriptor from the fixed table.
+ */
 int __io_close_fixed(struct io_ring_ctx *ctx, unsigned int issue_flags,
 		     unsigned int offset)
 {
@@ -197,6 +217,9 @@ int __io_close_fixed(struct io_ring_ctx *ctx, unsigned int issue_flags,
 	return ret;
 }
 
+/*
+ * io_close_fixed() - Helper to close a fixed file descriptor.
+ */
 static inline int io_close_fixed(struct io_kiocb *req, unsigned int issue_flags)
 {
 	struct io_close *close = io_kiocb_to_cmd(req, struct io_close);
@@ -204,6 +227,9 @@ static inline int io_close_fixed(struct io_kiocb *req, unsigned int issue_flags)
 	return __io_close_fixed(req->ctx, issue_flags, close->file_slot - 1);
 }
 
+/*
+ * io_close_prep() - Prepares close request by validating sqe fields.
+ */
 int io_close_prep(struct io_kiocb *req, const struct io_uring_sqe *sqe)
 {
 	struct io_close *close = io_kiocb_to_cmd(req, struct io_close);
@@ -221,6 +247,9 @@ int io_close_prep(struct io_kiocb *req, const struct io_uring_sqe *sqe)
 	return 0;
 }
 
+/*
+ * io_close() - Performs close operation, either normal or fixed.
+ */
 int io_close(struct io_kiocb *req, unsigned int issue_flags)
 {
 	struct files_struct *files = current->files;
@@ -240,7 +269,6 @@ int io_close(struct io_kiocb *req, unsigned int issue_flags)
 		goto err;
 	}
 
-	/* if the file has a flush method, be safe and punt to async */
 	if (file->f_op->flush && (issue_flags & IO_URING_F_NONBLOCK)) {
 		spin_unlock(&files->file_lock);
 		return -EAGAIN;
@@ -251,7 +279,6 @@ int io_close(struct io_kiocb *req, unsigned int issue_flags)
 	if (!file)
 		goto err;
 
-	/* No ->flush() or already async, safely close from here */
 	ret = filp_close(file, current->files);
 err:
 	if (ret < 0)
@@ -260,6 +287,9 @@ err:
 	return IOU_OK;
 }
 
+/*
+ * io_install_fixed_fd_prep() - Prepares the installation of a fixed file descriptor.
+ */
 int io_install_fixed_fd_prep(struct io_kiocb *req, const struct io_uring_sqe *sqe)
 {
 	struct io_fixed_install *ifi;
@@ -269,7 +299,6 @@ int io_install_fixed_fd_prep(struct io_kiocb *req, const struct io_uring_sqe *sq
 	    sqe->splice_fd_in || sqe->addr3)
 		return -EINVAL;
 
-	/* must be a fixed file */
 	if (!(req->flags & REQ_F_FIXED_FILE))
 		return -EBADF;
 
@@ -277,11 +306,9 @@ int io_install_fixed_fd_prep(struct io_kiocb *req, const struct io_uring_sqe *sq
 	if (flags & ~IORING_FIXED_FD_NO_CLOEXEC)
 		return -EINVAL;
 
-	/* ensure the task's creds are used when installing/receiving fds */
 	if (req->flags & REQ_F_CREDS)
 		return -EPERM;
 
-	/* default to O_CLOEXEC, disable if IORING_FIXED_FD_NO_CLOEXEC is set */
 	ifi = io_kiocb_to_cmd(req, struct io_fixed_install);
 	ifi->o_flags = O_CLOEXEC;
 	if (flags & IORING_FIXED_FD_NO_CLOEXEC)
@@ -290,6 +317,9 @@ int io_install_fixed_fd_prep(struct io_kiocb *req, const struct io_uring_sqe *sq
 	return 0;
 }
 
+/*
+ * io_install_fixed_fd() - Installs a file descriptor into the fixed table.
+*/
 int io_install_fixed_fd(struct io_kiocb *req, unsigned int issue_flags)
 {
 	struct io_fixed_install *ifi;
